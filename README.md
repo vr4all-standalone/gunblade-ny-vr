@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/github/readme-banner.png" alt="Gunblade NY VR — Sega arcade flyer artwork, standalone Meta Quest and PC VR" width="100%" />
+<img src="docs/github/readme-banner.png" alt="Gunblade NY VR — original Sega arcade flyer art, Meta Quest and PC VR" width="100%" />
 
 # Gunblade NY VR
 ### Sega Model 2B Arcade Light-Gun Action · Standalone Meta Quest & PC VR
