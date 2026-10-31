@@ -1,0 +1,198 @@
+--- a/src/osd/modules/sound/sdl_sound.cpp
++++ b/src/osd/modules/sound/sdl_sound.cpp
+@@ -17,6 +17,9 @@
+ #include "modules/lib/osdobj_common.h"
+ #include "osdcore.h"
+ #include "gunblade/audio_probe.h"
++#include "gunblade/adaptive_audio_bridge.h"
++#include "gunblade/shared_runtime.h"
++#include "modules/lib/osdlib.h"
+ 
+ // standard sdl header
+ #include <SDL2/SDL.h>
+@@ -69,10 +72,14 @@
+ 		uint32_t m_id;
+ 		SDL_AudioDeviceID m_sdl_id;
+ 		abuffer m_buffer;
++		gunblade::AudioStretchBridge m_stretch;
++		gunblade::AudioStretchProbe m_stretch_probe;
++		gunblade::SharedRuntime *m_runtime = nullptr;
+ 		bool m_audio_probe_enabled = false;
+ 		double m_audio_tick_seconds = 0;
+ 		gunblade::AudioProbe m_audio_probe;
+ 		stream_info(uint32_t id, uint8_t channels, uint32_t rate) : m_id(id), m_sdl_id(0), m_buffer(channels, rate) {}
++		~stream_info() { if(m_sdl_id) SDL_CloseAudioDevice(m_sdl_id); }
+ 	};
+ 
+ 	std::vector<device_info> m_devices;
+@@ -81,6 +88,7 @@
+ 	std::FILE *m_audio_log = nullptr;
+ 
+ 	void write_audio_probe(uint32_t id, const char *event, double now, const gunblade::AudioProbeRecord &record);
++	void write_audio_stretch(uint32_t id, const char *event, double now, const gunblade::AudioStretchRecord &record);
+ 
+ 	std::map<uint32_t, std::unique_ptr<stream_info>> m_streams;
+ 
+@@ -154,6 +162,8 @@
+ 
+ void sound_sdl::exit()
+ {
++	while(!m_streams.empty())
++		stream_close(m_streams.begin()->first);
+ 	SDL_QuitSubSystem(SDL_INIT_AUDIO);
+ 	if(m_audio_log) {
+ 		std::fclose(m_audio_log);
+@@ -236,19 +246,70 @@
+ 	stream->m_sdl_id = SDL_OpenAudioDevice(dev.m_def ? nullptr : dev.m_name.c_str(), 0, &dspec, &ospec, 0);
+ 	if(!stream->m_sdl_id)
+ 		return 0;
++	// Audio timestamps are needed even when diagnostic logging is disabled.
++	stream->m_audio_tick_seconds = 1.0 / double(SDL_GetPerformanceFrequency());
++	const double opened_at = SDL_GetPerformanceCounter() * stream->m_audio_tick_seconds;
++	if(gunblade::audio_stretch_requested(std::getenv("GUNBLADE_VR"),
++		std::getenv("GUNBLADE_AUDIO_STRETCH"),std::getenv("GUNBLADE_AUDIO_REFERENCE"))) {
++		gunblade::AudioStretchOpen result = gunblade::AudioStretchOpen::Unsupported;
++		if(ospec.freq==48000 && ospec.channels==2 && ospec.format==AUDIO_S16SYS) {
++			result = gunblade::AudioStretchOpen::MissingExports;
++			try {
++				const char *library = std::getenv("GUNBLADE_XR_LIBRARY");
++				if(library && library[0]) {
++					// This is an independent OS module reference. XR HostBridge may
++					// stop before SDL closes; the worker's code remains loaded.
++					std::shared_ptr<osd::dynamic_module> module(osd::dynamic_module::open({library}));
++					gunblade::AudioStretchFunctions api;
++					api.create=module->bind<decltype(api.create)>("gunblade_audio_create");
++					api.push=module->bind<decltype(api.push)>("gunblade_audio_push");
++					api.read=module->bind<decltype(api.read)>("gunblade_audio_read");
++					api.pause=module->bind<decltype(api.pause)>("gunblade_audio_pause");
++					api.stats=module->bind<decltype(api.stats)>("gunblade_audio_stats");
++					api.destroy=module->bind<decltype(api.destroy)>("gunblade_audio_destroy");
++					result=stream->m_stretch.open(api,std::move(module),ospec.freq,ospec.channels);
++				}
++			} catch(...) {
++				stream->m_stretch.reset();
++				result=gunblade::AudioStretchOpen::CreateFailed;
++			}
++		}
++		const char *reason="unsupported_format";
++		switch(result) {
++		case gunblade::AudioStretchOpen::Ready: reason="ready";break;
++		case gunblade::AudioStretchOpen::Unsupported: break;
++		case gunblade::AudioStretchOpen::MissingExports: reason="missing_library_or_exports";break;
++		case gunblade::AudioStretchOpen::CreateFailed: reason="create_failed";break;
++		case gunblade::AudioStretchOpen::InvalidStats: reason="invalid_stats_abi_or_state";break;
++		}
++		if(stream->m_stretch.active()) {
++			// Force runtime initialization here, never from the SDL callback.
++			stream->m_runtime=&gunblade::shared_runtime();
++			GunbladeAudioStats initial{};
++			stream->m_stretch.snapshot(initial);
++			stream->m_stretch_probe.begin(opened_at,initial);
++			osd_printf_verbose("Audio: Gunblade adaptive output active, 48000Hz stereo S16\n");
++		} else
++			osd_printf_warning("Audio: Gunblade adaptive output unavailable (%s); using legacy SDL buffer\n",reason);
++		if(m_audio_log) {
++			std::fprintf(m_audio_log,"AUDIO_STRETCH_OPEN stream=%u wall_s=%.6f active=%u reason=%s\n",stream->m_id,opened_at,unsigned(stream->m_stretch.active()),reason);
++			std::fflush(m_audio_log);
++		}
++	}
+ 	if(m_audio_log) {
+-		stream->m_audio_probe_enabled = true;
+-		stream->m_audio_tick_seconds = 1.0 / double(SDL_GetPerformanceFrequency());
++		stream->m_audio_probe_enabled = !stream->m_stretch.active();
+ 		const double now = SDL_GetPerformanceCounter() * stream->m_audio_tick_seconds;
+-		stream->m_audio_probe.begin(now, stream->m_buffer.available());
++		if(stream->m_audio_probe_enabled) stream->m_audio_probe.begin(now, stream->m_buffer.available());
+ 		std::fprintf(m_audio_log,
+ 			"AUDIO_OPEN stream=%u wall_s=%.6f requested_rate=%u rate=%d channels=%u samples=%u format=0x%04x\n",
+ 			stream->m_id, now, rate, ospec.freq, unsigned(ospec.channels), unsigned(ospec.samples), unsigned(ospec.format));
+ 		std::fflush(m_audio_log);
+ 	}
+-	SDL_PauseAudioDevice(stream->m_sdl_id, 0);
+-	uint32_t id = stream->m_id;
+-	m_streams[stream->m_id] = std::move(stream);
++	const uint32_t id = stream->m_id;
++	const SDL_AudioDeviceID device = stream->m_sdl_id;
++	m_streams[id] = std::move(stream);
++	// Creation, ABI checks and all callback state are complete while paused.
++	SDL_PauseAudioDevice(device, 0);
+ 	return id;
+ }
+ 
+@@ -258,6 +319,15 @@
+ 	if(si == m_streams.end())
+ 		return;
+ 	SDL_CloseAudioDevice(si->second->m_sdl_id);
++	si->second->m_sdl_id = 0;
++	if(si->second->m_stretch.active()) {
++		const double now=SDL_GetPerformanceCounter()*si->second->m_audio_tick_seconds;
++		GunbladeAudioStats total{};
++		if(si->second->m_stretch.snapshot(total))
++			write_audio_stretch(id,"close",now,si->second->m_stretch_probe.take(total,now));
++		// No SDL callback can enter now. Destroy joins DSP before module unload.
++		si->second->m_stretch.reset();
++	}
+ 	if(si->second->m_audio_probe_enabled) {
+ 		const double now = SDL_GetPerformanceCounter() * si->second->m_audio_tick_seconds;
+ 		write_audio_probe(id, "close", now, si->second->m_audio_probe.take(now));
+@@ -271,6 +341,16 @@
+ 	if(si == m_streams.end())
+ 		return;
+ 	stream_info *stream = si->second.get();
++	if(stream->m_stretch.active()) {
++		const double now=SDL_GetPerformanceCounter()*stream->m_audio_tick_seconds;
++		if(samples_this_frame>0) stream->m_stretch.push(buffer,uint32_t(samples_this_frame),now);
++		if(stream->m_stretch_probe.due(now)) {
++			GunbladeAudioStats total{};
++			if(stream->m_stretch.snapshot(total))
++				write_audio_stretch(id,"interval",now,stream->m_stretch_probe.take(total,now));
++		}
++		return;
++	}
+ 	gunblade::AudioProbeRecord record;
+ 	double now = 0;
+ 	bool report = false;
+@@ -293,6 +373,15 @@
+ void sound_sdl::sink_callback(void *userdata, uint8_t *data, int len)
+ {
+ 	stream_info *stream = reinterpret_cast<stream_info *>(userdata);
++	if(stream->m_stretch.active()) {
++		const uint32_t frames=uint32_t(len)/4;
++		const double now=SDL_GetPerformanceCounter()*stream->m_audio_tick_seconds;
++		const bool paused=stream->m_runtime->pause_requested.load(std::memory_order_relaxed) ||
++			!stream->m_runtime->host_ready.load(std::memory_order_relaxed);
++		stream->m_stretch.read(reinterpret_cast<int16_t *>(data),frames,now,paused);
++		if(len&3) std::fill(data+frames*4,data+len,uint8_t(0));
++		return;
++	}
+ 	const uint32_t frames = len / 2 / stream->m_buffer.channels();
+ 	if(stream->m_audio_probe_enabled) {
+ 		const double now = SDL_GetPerformanceCounter() * stream->m_audio_tick_seconds;
+@@ -316,6 +405,27 @@
+ 	std::fflush(m_audio_log);
+ }
+ 
++void sound_sdl::write_audio_stretch(uint32_t id, const char *event, double now, const gunblade::AudioStretchRecord &record)
++{
++	const auto &d=record.delta;const auto &t=record.total;
++	// Cumulative atomic counters yield interval deltas. Queues, tempo and ratio
++	// are current gauges; gap fields remain explicitly cumulative maxima.
++	char line[2048];
++	std::snprintf(line,sizeof(line),
++		"AUDIO_STRETCH stream=%u wall_s=%.6f event=%s seconds=%.6f state=%u native_frames=%llu produced_frames=%llu requested_frames=%llu delivered_frames=%llu missing_frames=%llu warmup_frames=%llu paused_frames=%llu paused_input_frames=%llu input_drops=%llu output_drops=%llu callbacks=%llu underrun_callbacks=%llu input_blocks=%llu output_blocks=%llu input_queue=%u output_queue=%u tempo=%.6f input_ratio=%.6f cumulative_max_input_gap_ms=%.3f cumulative_max_output_gap_ms=%.3f\n",
++		id,now,event,record.seconds,t.state,
++		static_cast<unsigned long long>(d.native_frames),static_cast<unsigned long long>(d.output_frames),
++		static_cast<unsigned long long>(d.requested_frames),static_cast<unsigned long long>(d.delivered_frames),
++		static_cast<unsigned long long>(d.missing_frames),static_cast<unsigned long long>(d.warmup_frames),
++		static_cast<unsigned long long>(d.paused_frames),static_cast<unsigned long long>(d.paused_input_frames),
++		static_cast<unsigned long long>(d.input_dropped_frames),static_cast<unsigned long long>(d.output_dropped_frames),
++		static_cast<unsigned long long>(d.callbacks),static_cast<unsigned long long>(d.underrun_callbacks),
++		static_cast<unsigned long long>(d.input_blocks),static_cast<unsigned long long>(d.output_blocks),
++		t.input_queue_frames,t.output_queue_frames,t.tempo,t.input_ratio,t.max_input_gap_ms,t.max_output_gap_ms);
++	if(m_audio_log) {std::fputs(line,m_audio_log);std::fflush(m_audio_log);}
++	else osd_printf_verbose("%s",line);
++}
++
+ } // anonymous namespace
+ 
+ } // namespace osd

@@ -1,0 +1,13 @@
+--- a/src/osd/modules/sound/sdl_sound.cpp
++++ b/src/osd/modules/sound/sdl_sound.cpp
+@@ -302,7 +302,8 @@
+ 		if(stream->m_audio_probe_enabled) stream->m_audio_probe.begin(now, stream->m_buffer.available());
+ 		std::fprintf(m_audio_log,
+-			"AUDIO_OPEN stream=%u wall_s=%.6f requested_rate=%u rate=%d channels=%u samples=%u format=0x%04x\n",
+-			stream->m_id, now, rate, ospec.freq, unsigned(ospec.channels), unsigned(ospec.samples), unsigned(ospec.format));
++			"AUDIO_OPEN stream=%u wall_s=%.6f requested_rate=%u rate=%d channels=%u samples=%u format=0x%04x driver=%s\n",
++			stream->m_id, now, rate, ospec.freq, unsigned(ospec.channels), unsigned(ospec.samples), unsigned(ospec.format),
++			SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "none");
+ 		std::fflush(m_audio_log);
+ 	}
+ 	const uint32_t id = stream->m_id;

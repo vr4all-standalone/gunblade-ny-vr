@@ -1,0 +1,12 @@
+--- a/src/osd/modules/sound/sdl_sound.cpp
++++ b/src/osd/modules/sound/sdl_sound.cpp
+@@ -255,7 +255,8 @@
+ 		if(ospec.freq==48000 && ospec.channels==2 && ospec.format==AUDIO_S16SYS) {
+ 			result = gunblade::AudioStretchOpen::MissingExports;
+ 			try {
+-				const char *library = std::getenv("GUNBLADE_XR_LIBRARY");
++				const char *library = gunblade::audio_stretch_library(
++					std::getenv("GUNBLADE_AUDIO_LIBRARY"),std::getenv("GUNBLADE_XR_LIBRARY"));
+ 				if(library && library[0]) {
+ 					// This is an independent OS module reference. XR HostBridge may
+ 					// stop before SDL closes; the worker's code remains loaded.

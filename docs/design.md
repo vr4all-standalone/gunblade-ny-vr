@@ -1,0 +1,11 @@
+# Gunblade NY VR design
+
+The user authorized independent implementation while the original chat continues Virtua Cop 2. Build a playable original-game port for Quest 3/3S and Windows OpenXR. Work only within this project and its private compiler/research directories. Preserve the dirty installer, sibling ports, shared reference engine and original media. No publishing or commercial-data download is authorized.
+
+Use MAME 0.289 at f34f02505e32c1993c6a782b6814232cbfc74e36. Original Gunblade NY is Model 2B: its cabinet uses an 8-bit ADC and inherits Rail Chase 2's P1/P2 trigger bits 0x01/0x02 on IN1; IN2 is unused. It does not use VC2's serial lightgun board or 10-bit offscreen reload contract. Verify boot, player acknowledgement, service/calibration and weapon behavior from the actual game before assigning semantics.
+
+Use a separate D:/VR4ALL-Gunblade-Build/engine checkout. Validate all required original payloads by size, CRC32 and SHA1; create a canonical copy in private staging. Never run from or write into source-game directories. Diagnostics must use fresh state and bounded child processes. Reuse only stable common Model 2 VR-host code when it becomes available; retain this game's own adapter.
+
+Required VR presentation: real per-eye stereo world rendering and head tracking; tracked original gun/pickup models where present; P1/P2 start, join and continue; P1-left/P2-right default with reversible saved hands; startup branding dismissed by native content with a one-focused-second maximum; labelled controllers and How to play; native service and calibration controls; purple VR4ALL settings; original-game-appropriate weapon/reload actions; lasers and native accepted-shot effects/haptics; world/gun sizing, recenter, pause, quit and saved settings. Match the licensed shared presentation modules in ports/carnevil-vr. Own app identity com.vrlightgunhub.gunbladeny.
+
+Do not report a native foundation as a playable VR build. Headset rendering, frame pacing, calibration, player controls and media-free software packages must each be verified. Unknown player state and native shot acceptance fail closed rather than producing invented feedback. Pending common host integration is a dependency, not a reason to stop native evidence or adapter work.

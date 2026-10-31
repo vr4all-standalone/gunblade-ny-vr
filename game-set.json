@@ -1,0 +1,133 @@
+{
+  "set": "gunblade",
+  "hardware": "Model 2B",
+  "commit": "f34f02505e32c1993c6a782b6814232cbfc74e36",
+  "files": [
+    {
+      "name": "epr-18988a.15",
+      "size": 524288,
+      "crc32": "f63f1ad2",
+      "sha1": "fcfb0a4691cd7d66168c421e4e1694ecaea56ab2",
+      "group": "game"
+    },
+    {
+      "name": "epr-18989a.16",
+      "size": 524288,
+      "crc32": "c1c84d65",
+      "sha1": "92bffbf1250c53499c37a53f9e2a054fc7bf256f",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18974.11",
+      "size": 4194304,
+      "crc32": "e29ecaff",
+      "sha1": "dcdfe9f59158cec2f02b213ee13f5e40cdb92e55",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18975.12",
+      "size": 4194304,
+      "crc32": "d8187582",
+      "sha1": "34a0b32eeed1a9f41bca8b9261851881b2ba79f2",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18976.9",
+      "size": 4194304,
+      "crc32": "c95c15eb",
+      "sha1": "892063e91b2ed20e0600d4b188da1e9f45a19692",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18977.10",
+      "size": 4194304,
+      "crc32": "db8f5b6f",
+      "sha1": "c11d2c9e1e215aa7b2ebb777639c8cd651901f52",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18986.29",
+      "size": 4194304,
+      "crc32": "04820f7b",
+      "sha1": "5eb6682399b358d77658d82e612b02b724e3f3e1",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18987.30",
+      "size": 4194304,
+      "crc32": "2419367f",
+      "sha1": "0a04a1049d2da486dc9dbb97b383bd24259b78c8",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18980.17",
+      "size": 4194304,
+      "crc32": "22345534",
+      "sha1": "7b8bdcfe88953ce1b2d75af2ce4712ab6507e2cf",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18981.21",
+      "size": 4194304,
+      "crc32": "2544a33d",
+      "sha1": "a76193f70adb6abeba02328b290af5cca47d4e25",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18982.18",
+      "size": 4194304,
+      "crc32": "d0a92b2a",
+      "sha1": "95404baed88cc95b75ff9b9084d09622961d3e57",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18983.22",
+      "size": 4194304,
+      "crc32": "1b4af982",
+      "sha1": "550f8248699b9267da7d2e64002be56972381714",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18985.27",
+      "size": 4194304,
+      "crc32": "ad6166e3",
+      "sha1": "2c487fb743730cacf92dbea952b1efada0f073df",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18984.25",
+      "size": 4194304,
+      "crc32": "756f6f37",
+      "sha1": "095964de773f515d64d65dbc8f8ef9bae97e5ba9",
+      "group": "game"
+    },
+    {
+      "name": "epr-18990.31",
+      "size": 524288,
+      "crc32": "02b1b0d1",
+      "sha1": "759b4683dc7149e04f41ddac7bd395e8d07ea858",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18978.32",
+      "size": 4194304,
+      "crc32": "0f78b3e3",
+      "sha1": "6c2cd6236cb001bb8d487a9b1e9907519dc43daa",
+      "group": "game"
+    },
+    {
+      "name": "mpr-18979.34",
+      "size": 4194304,
+      "crc32": "f13ea36f",
+      "sha1": "a8165116b5e07e031ff960201dd8c9a441544961",
+      "group": "game"
+    },
+    {
+      "name": "epr-18022.ic2",
+      "size": 65536,
+      "crc32": "0ca70f80",
+      "sha1": "edf5ade72d9fa2f4d5f83f9f89e6cecfadd77f56",
+      "group": "billboard"
+    }
+  ]
+}
