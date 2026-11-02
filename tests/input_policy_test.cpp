@@ -9,7 +9,7 @@ static void either_hand_starts_p1(int layout,int first) {
     Settings settings;settings.p1_hand=layout;
     NativeState native;native.valid=native.start_ready=true;
     auto hands=neutral();InputPolicy policy;policy.update(0,hands,native,settings,true,false);
-    hands[first].start=hands[first].trigger=true;
+    hands[first].start=true;
     auto input=policy.update(.01,hands,native,settings,true,false);
     assert(input.cabinet.coins==1&&input.cabinet.starts==0); // Either hand inserts P1 credit.
     input=policy.update(.12,hands,native,settings,true,false);
@@ -18,14 +18,15 @@ static void either_hand_starts_p1(int layout,int first) {
     assert(input.cabinet.coins==0&&input.cabinet.starts==1); // Native P1 Start follows credit.
     native.joined_mask=1;
     input=policy.update(.18,hands,native,settings,true,false);
+    assert(input.hand[0]==first); // Start hand owns solo P1 before any trigger pull.
     assert(input.cabinet.coins==0&&input.cabinet.starts==0&&!input.cabinet.trigger[0]);
     input=policy.update(.30,hands,native,settings,true,false);
     assert(input.cabinet.coins==0&&input.cabinet.starts==0&&!input.cabinet.trigger[0]);
     hands=neutral();policy.update(.31,hands,native,settings,true,false);
     hands[first].trigger=true;input=policy.update(.32,hands,native,settings,true,false);
     assert(input.hand[0]==first&&input.cabinet.trigger[0]); // Solo P1 still uses either hand.
-    const int second=1-layout;
-    hands[0].trigger=hands[1].trigger=true;hands[second].start=true;
+    const int second=1-first;
+    hands[first].trigger=true;hands[second].trigger=false;hands[second].start=true;
     input=policy.update(.33,hands,native,settings,true,false);
     assert(input.cabinet.coins==2&&input.cabinet.starts==0);
     input=policy.update(.49,hands,native,settings,true,false);
@@ -49,6 +50,50 @@ static void either_hand_starts_p1(int layout,int first) {
 }
 int main() {
     for(int layout:{0,1})for(int first:{1,0})either_hand_starts_p1(layout,first);
+    for(int layout:{0,1}){
+        Settings config;config.p1_hand=layout;NativeState game;game.valid=game.start_ready=true;game.joined_mask=1;
+        auto controllers=neutral();InputPolicy solo;solo.update(0,controllers,game,config,true,false);
+        controllers[layout].trigger=true;auto old=solo.update(.01,controllers,game,config,true,false);
+        controllers[1-layout].trigger=true;auto switched=solo.update(.02,controllers,game,config,true,false);
+        assert(switched.hand[0]==1-layout&&switched.cabinet.trigger[0]); // New pull wins over old held fire.
+        CabinetLatch latch;latch.update(old);assert(!latch.update(switched).cabinet.trigger[0]);
+        assert(latch.update(switched).cabinet.trigger[0]); // One native release frame before new owner fires.
+        assert(solo.update(.03,controllers,game,config,true,false).hand[0]==1-layout);
+        controllers[1-layout].start=true;assert(solo.update(.10,controllers,game,config,true,false).cabinet.coins==1);
+        controllers[1-layout].start=false;assert(solo.update(.30,controllers,game,config,true,false).cabinet.starts==1);
+        solo.update(.31,controllers,game,config,true,false);
+        controllers[layout].start=true;assert(solo.update(.45,controllers,game,config,true,false).cabinet.coins==2);
+        assert(solo.update(.60,controllers,game,config,true,false).cabinet.starts==2);
+        game.joined_mask=3;auto dual=solo.update(.62,controllers,game,config,true,false);
+        assert(dual.hand[0]==layout&&dual.hand[1]==1-layout&&!dual.cabinet.trigger[0]&&!dual.cabinet.trigger[1]);
+        InputPolicy tied;controllers=neutral();game.joined_mask=0;tied.update(1,controllers,game,config,true,false);
+        controllers[0].start=controllers[1].start=true;assert(tied.update(1.01,controllers,game,config,true,false).cabinet.coins==1);
+        game.joined_mask=1;auto first=tied.update(1.02,controllers,game,config,true,false);
+        assert(first.hand[0]==layout&&first.cabinet.coins==0); // Simultaneous Start is stable, never auto-joins P2.
+        InputPolicy survivor;controllers=neutral();game.joined_mask=3;survivor.update(2,controllers,game,config,true,false);
+        game.joined_mask=2;auto remaining=survivor.update(2.01,controllers,game,config,true,false);
+        assert(remaining.hand[0]==-1&&remaining.hand[1]==1-layout);
+        controllers[layout].trigger=true;auto moved=survivor.update(2.02,controllers,game,config,true,false);
+        assert(moved.hand[0]==-1&&moved.hand[1]==layout); // Retain native P2 identity while using either hand.
+        controllers[1-layout].start=true;assert(survivor.update(2.03,controllers,game,config,true,false).cabinet.coins==1);
+        InputPolicy solo_layout;controllers=neutral();game.joined_mask=1;solo_layout.update(3,controllers,game,config,true,false);
+        const int owner=config.p1_hand;controllers[owner].trigger=true;solo_layout.update(3.01,controllers,game,config,true,false);
+        controllers[owner].trigger=false;solo_layout.update(3.02,controllers,game,config,true,false);
+        config.p1_hand=1-owner;auto changed_setting=solo_layout.update(3.03,controllers,game,config,true,false);
+        assert(changed_setting.hand[0]==owner); // Two-player assignment never steals solo ownership.
+        game.joined_mask=3;auto joined_layout=solo_layout.update(3.04,controllers,game,config,true,false);
+        assert(joined_layout.hand[0]==config.p1_hand&&joined_layout.hand[1]==1-config.p1_hand);
+        InputPolicy focus_owner;controllers=neutral();game.joined_mask=1;focus_owner.update(4,controllers,game,config,true,false);
+        const int taken=1-config.p1_hand;controllers[taken].trigger=true;focus_owner.update(4.01,controllers,game,config,true,false);
+        controllers[taken].trigger=false;focus_owner.update(4.02,controllers,game,config,true,false);focus_owner.suspend();
+        focus_owner.update(4.03,controllers,game,config,false,false);
+        auto refocused=focus_owner.update(4.04,controllers,game,config,true,false);
+        assert(refocused.hand[0]==taken&&!refocused.cabinet.trigger[0]); // Focus never reapplies the dual layout to solo.
+        InputPolicy dropped;controllers=neutral();game.joined_mask=3;dropped.update(5,controllers,game,config,true,false);dropped.suspend();
+        game.joined_mask=2;dropped.update(5.01,controllers,game,config,false,false);dropped.suspend();
+        auto resumed_survivor=dropped.update(5.02,controllers,game,config,true,false);
+        assert(resumed_survivor.hand[0]==-1&&resumed_survivor.hand[1]==1-config.p1_hand);
+    }
     {
         Settings defaults;NativeState game;game.valid=game.start_ready=true;game.joined_mask=3;
         auto controllers=neutral();InputPolicy normal;
@@ -158,7 +203,7 @@ int main() {
     assert(!reset.cabinet.trigger[0] && reset.cabinet.coins==0 && reset.cabinet.starts==0);
 
     InputPolicy handoff;hands=neutral();native.joined_mask=1;
-    handoff.update(5,hands,native,settings,true,false);
+    hands[0].trigger=true;handoff.update(5,hands,native,settings,true,false);
     hands[1].trigger=true;handoff.update(5.01,hands,native,settings,true,false);
     hands[0].trigger=true;handoff.update(5.02,hands,native,settings,true,false);
     hands[1].tracked=false;hands[1].trigger=false;

@@ -15,8 +15,8 @@ android {
         applicationId = "com.vrlightgunhub.gunbladeny"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-beta"
+        versionCode = 9
+        versionName = "0.1.8-beta"
         ndk { abiFilters += "arm64-v8a" }
     }
     signingConfigs { create("local") {

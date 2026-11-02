@@ -13,6 +13,7 @@ uniform float hud_size;uniform bool reticle_pass;uniform ivec2 reticle_mask;unif
 out vec3 native_position;out vec3 texture_position;
 flat out int source_polygon;
 flat out int world_geometry;
+flat out int fade_geometry;
 flat out int hidden_reticle;
 flat out ivec4 header;flat out int polygon_luma;flat out int polygon_lod;
 void main(){
@@ -22,6 +23,7 @@ void main(){
     hidden_reticle=!reticle_pass&&player>=0?(player==0?reticle_mask.x:reticle_mask.y):0;
     bool panel_geometry=(material_properties.z&1)!=0;
     world_geometry=!reticle_pass&&immersive&&!panel_geometry?1:0;
+    fade_geometry=!reticle_pass&&!panel_geometry&&player<0?1:0;
     if(reticle_pass){
         vec3 local=vec3((raster.x-reticle_center.x)*distance/lens.x,(reticle_center.y-raster.y)*distance/lens.y,0);
         gl_Position=vp*reticle_model*vec4(local,1.0);
@@ -43,11 +45,13 @@ inline constexpr const char* Model2Fragment=R"(#version 330
 in vec3 native_position;in vec3 texture_position;out vec4 color;
 flat in int source_polygon;
 flat in int world_geometry;
+flat in int fade_geometry;
 flat in int hidden_reticle;
 uniform usampler2D texture0;uniform usampler2D texture1;uniform usampler2D palette;
 uniform usampler2D colorxlat;uniform usampler2D lumaram;uniform usampler2D gamma;
 flat in ivec4 header;flat in int polygon_luma;flat in int polygon_lod;
 uniform sampler2D source_scanlines;
+uniform bool view_fade;uniform vec2 source_size;
 vec4 source_record(int offset){return texelFetch(source_scanlines,ivec2(offset&2047,offset>>11),0);}
 int source_offset(vec2 xy){return int(xy.x)+int(xy.y)*2048;}
 vec3 source_q(vec2 pixel){
@@ -157,6 +161,17 @@ void main(){
     for(int c=0;c<3;c++){
         uint raw=read_word(colorxlat,c*8192+int(((base>>(c*5))&31u)<<8)+int(luma))&255u;
         rgb[c]=float(read_byte(gamma,int(raw)))/255.0;
+    }
+    if(view_fade&&fade_geometry!=0){
+        // Use the native raster, rather than eye/display coordinates. Its full
+        // original image stays identical; only extra scenery fades to black
+        // over a quarter-raster border, smoothly rounded at the corners.
+        vec2 outside=max(max(-source_pixel,source_pixel-source_size),vec2(0.0))/source_size;
+        float visibility=1.0-smoothstep(0.0,0.25,length(outside));
+        // Signed immersive geometry behind the original camera must not fold
+        // through its perspective divide into a second bright central image.
+        if(native_position.z<=0.0)visibility=0.0;
+        rgb*=visibility;
     }
     color=vec4(rgb,1.0);
 })";

@@ -25,7 +25,7 @@ int main(){
     std::istringstream current("wider_view=0\nversion=2\n");
     auto selected=read_settings(current);assert(!selected.wider_view);
     std::ostringstream output;write_settings(output,selected);
-    assert(output.str().find("version=6\n")==0);
+    assert(output.str().find("version=9\n")==0);
     std::istringstream roundtrip(output.str());assert(!read_settings(roundtrip).wider_view);
     std::istringstream invalid("version=2\nwider_view=nan\n");
     assert(read_settings(invalid).wider_view);
@@ -37,7 +37,7 @@ int main(){
     std::ostringstream reversed;write_settings(reversed,hand_migration);
     std::istringstream reloaded(reversed.str());
     assert(read_settings(reloaded).p1_hand==1);
-    std::istringstream current_hands("p1_hand=1\nversion=6\n");
+    std::istringstream current_hands("p1_hand=1\nversion=9\n");
     bool upgraded=true;assert(read_settings(current_hands,&upgraded).p1_hand==1&&!upgraded);
     std::istringstream needs_upgrade("version=2\np1_hand=1\n");
     assert(read_settings(needs_upgrade,&upgraded).p1_hand==0&&upgraded);
@@ -45,11 +45,11 @@ int main(){
     auto new_baseline=read_settings(old_angle,&upgraded);
     assert(new_baseline.gun_angle==0&&new_baseline.gun==0&&upgraded);
     assert(new_baseline.p1_hand==1&&!new_baseline.wider_view&&new_baseline.world_scale==.25f);
-    std::istringstream later_angle("version=6\ngun_angle=13\ngun=1\np1_hand=1\n");
+    std::istringstream later_angle("version=9\ngun_angle=13\ngun=1\np1_hand=1\n");
     auto later=read_settings(later_angle,&upgraded);
     assert(later.gun_angle==13&&later.gun==1&&later.p1_hand==1&&!upgraded);
     std::ostringstream newer;write_settings(newer,later);
-    assert(newer.str().find("version=6\n")==0);
+    assert(newer.str().find("version=9\n")==0);
     std::istringstream recheck(newer.str());assert(read_settings(recheck).gun_angle==13);
     std::istringstream previous("version=4\ngun_angle=13\np1_hand=1\nwider_view=0\npanel_distance=2.4\n");
     auto knobs=read_settings(previous,&upgraded);

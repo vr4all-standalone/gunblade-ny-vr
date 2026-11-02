@@ -30,7 +30,7 @@ public final class SetupActivity extends Activity {
     private View badgeDot;
     private LinearLayout badge, marksRow, more;
     private Button allow, play;
-    private boolean moreTouched;
+    private boolean moreTouched, settingsBackup;
     private File checkedDirectory;
 
     private File downloads() { return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS); }
@@ -48,6 +48,7 @@ public final class SetupActivity extends Activity {
     }
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
+        if(getIntent().getBooleanExtra("vr4all.backupSettings",false)) { backupSettings(); return; }
         launchPolicy=new ReadyLaunchPolicy(suppressed(getIntent()),saved!=null && saved.getBoolean(STATE_CONSUMED));
         getWindow().setBackgroundDrawable(new ColorDrawable(DECK));
         LinearLayout page=new LinearLayout(this);
@@ -74,20 +75,36 @@ public final class SetupActivity extends Activity {
         show(false,downloadsAllowed(),false,suppressed(getIntent())?"VR session ended. Choose Play to enter again.":"Checking your game files…");
     }
     @Override public void onResume() {
-        super.onResume(); launchPolicy.onResume(); check();
+        super.onResume(); if(settingsBackup) return; launchPolicy.onResume(); check();
     }
     @Override public void onPause() {
-        launchPolicy.onPause(); super.onPause();
+        if(launchPolicy!=null) launchPolicy.onPause(); super.onPause();
     }
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent); setIntent(intent);
+        if(settingsBackup) return;
+        if(intent.getBooleanExtra("vr4all.backupSettings",false)) {
+            launchPolicy.onNewEntry(true); backupSettings(); return;
+        }
         launchPolicy.onNewEntry(suppressed(intent)); check();
     }
     @Override protected void onSaveInstanceState(Bundle out) {
+        if(settingsBackup) { super.onSaveInstanceState(out); return; }
         out.putBoolean(STATE_CONSUMED,launchPolicy.autoStartConsumed());
         out.putBoolean("moreTouched",moreTouched);
         out.putBoolean("moreOpen",more.getVisibility()==View.VISIBLE);
         super.onSaveInstanceState(out);
+    }
+    /** Shell opt-in only; bypass all launcher preparation and never enter the native game. */
+    private void backupSettings() {
+        settingsBackup=true;
+        new Thread(()->{
+            try {
+                File snapshot=SettingsBackup.create(getFilesDir(),getExternalFilesDir(null));
+                Log.i("VR4ALL-SettingsBackup","complete: "+snapshot.getName());
+            } catch(Exception error) { Log.e("VR4ALL-SettingsBackup","failed",error); }
+            runOnUiThread(this::finish);
+        },"Gunblade NY settings backup").start();
     }
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) {
         super.onRequestPermissionsResult(request,permissions,results);
@@ -121,6 +138,7 @@ public final class SetupActivity extends Activity {
         }
     }
     private void check() {
+        if(settingsBackup) return;
         final int token=launchPolicy.beginCheck();
         if(token<0 || isFinishing() || isDestroyed()) return;
         final boolean access=downloadsAllowed();
@@ -140,7 +158,7 @@ public final class SetupActivity extends Activity {
             } catch(Exception exception) { error=exception.getMessage()!=null?exception.getMessage():exception.toString(); }
             final String result=error;
             runOnUiThread(()->{
-                if(isFinishing() || isDestroyed()) return;
+                if(settingsBackup || isFinishing() || isDestroyed()) return;
                 if(!launchPolicy.finishCheck(token,result==null)) { check(); return; }
                 checkedDirectory=result==null?directory:null;
                 show(result==null,access,false,result!=null?"Game files are not ready:\n"+result:

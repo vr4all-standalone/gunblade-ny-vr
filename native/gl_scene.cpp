@@ -33,6 +33,23 @@ struct GLScene::Impl {
     float hud_size{1};bool hud_gameplay{},hud_service{};
     GLuint world{},panel{},vao{},vbo{},panel_vao{},panel_vbo{},reticle_vao{},reticle_vbo{},custom{},custom_vao{},custom_vbo{};
     GLuint resources[6]{},rasters[3]{},scanlines{};
+    struct UploadShape {
+        GLsizei width{},height{};GLint internal{};GLenum format{},type{};bool transparent{};
+        bool operator==(const UploadShape&)const=default;
+    };
+    template<class T> struct UploadCache {
+        UploadShape shape;std::vector<T> source;bool uploaded{};
+        bool matches(const std::vector<T>& bytes,const UploadShape& next)const {
+            return uploaded&&shape==next&&source==bytes;
+        }
+        void remember(const std::vector<T>& bytes,const UploadShape& next) {
+            source=bytes;shape=next;uploaded=true;
+        }
+    };
+    // Each GL texture owns just its latest source bytes. Exact comparisons
+    // avoid hash collisions and do not retain old geometry/NativeFrames.
+    std::array<UploadCache<uint8_t>,6> resource_uploads;
+    std::array<UploadCache<uint32_t>,3> raster_uploads;
     // Flat integer attributes preserve every primitive's native material and
     // source scanline index in one ordered triangle stream.
     struct WorldVertex {std::array<float,5> raster;std::array<int32_t,4> header,properties;std::array<float,3> camera,original;};
@@ -49,15 +66,18 @@ struct GLScene::Impl {
     std::array<GLsizei,2> reticle_count{};
     std::unique_ptr<Model2Resources> materials;
     GLsizei vertex_count{};
-    bool usable{},wider_view{},immersive{};
+    bool usable{},wider_view{},immersive{},view_fade{};
     NativeLens presentation_override;
-    struct WorldUniforms {GLint vp,lens,scale,distance,immersive,reticle_pass,reticle_mask,reticle_model,reticle_center,hud_size;} w{};
+    struct WorldUniforms {GLint vp,lens,scale,distance,immersive,reticle_pass,reticle_mask,reticle_model,reticle_center,hud_size,view_fade,source_size;} w{};
     struct PanelUniforms {GLint vp,lens,distance,size,hud_size;} p{};
     struct CustomUniforms {GLint vp,model,half_size,color;} c{};
-    void raster(GLuint texture,const std::vector<uint32_t>& pixels,bool transparent) {
+    void raster(unsigned index,const std::vector<uint32_t>& pixels,bool transparent) {
+        const UploadShape shape{frame->width,frame->height,GL_RGBA8,GL_RGBA,GL_UNSIGNED_BYTE,transparent};
+        auto& cache=raster_uploads[index];if(cache.matches(pixels,shape))return;
         std::vector<uint8_t> rgba(pixels.size()*4);
         for(size_t i=0;i<pixels.size();i++) {auto c=pixels[i];rgba[i*4]=c>>16;rgba[i*4+1]=c>>8;rgba[i*4+2]=c;rgba[i*4+3]=transparent&&c==0?0:255;}
-        glBindTexture(GL_TEXTURE_2D,texture);glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,frame->width,frame->height,0,GL_RGBA,GL_UNSIGNED_BYTE,rgba.data());
+        glBindTexture(GL_TEXTURE_2D,rasters[index]);glTexImage2D(GL_TEXTURE_2D,0,shape.internal,shape.width,shape.height,0,shape.format,shape.type,rgba.data());
+        cache.remember(pixels,shape);
     }
     void draw_raster(unsigned index,const glm::mat4& vp,const NativeLens& lens,float distance) {
         const auto& pixels=index==0?frame->background:index==1?frame->foreground:frame->native;
@@ -87,7 +107,8 @@ GLScene::GLScene():impl_(std::make_unique<Impl>()) {
     auto& i=*impl_;i.world=program(Model2Vertex,Model2Fragment);i.panel=program(Model2PanelVertex,Model2PanelFragment);
     i.custom=program(CustomReticleVertexShader,CustomReticleFragmentShader);
     i.w={glGetUniformLocation(i.world,"vp"),glGetUniformLocation(i.world,"lens"),glGetUniformLocation(i.world,"scale"),glGetUniformLocation(i.world,"distance"),glGetUniformLocation(i.world,"immersive"),
-        glGetUniformLocation(i.world,"reticle_pass"),glGetUniformLocation(i.world,"reticle_mask"),glGetUniformLocation(i.world,"reticle_model"),glGetUniformLocation(i.world,"reticle_center"),glGetUniformLocation(i.world,"hud_size")};
+        glGetUniformLocation(i.world,"reticle_pass"),glGetUniformLocation(i.world,"reticle_mask"),glGetUniformLocation(i.world,"reticle_model"),glGetUniformLocation(i.world,"reticle_center"),glGetUniformLocation(i.world,"hud_size"),
+        glGetUniformLocation(i.world,"view_fade"),glGetUniformLocation(i.world,"source_size")};
     i.p={glGetUniformLocation(i.panel,"vp"),glGetUniformLocation(i.panel,"lens"),glGetUniformLocation(i.panel,"distance"),glGetUniformLocation(i.panel,"size"),glGetUniformLocation(i.panel,"hud_size")};
     i.c={glGetUniformLocation(i.custom,"vp"),glGetUniformLocation(i.custom,"model"),glGetUniformLocation(i.custom,"half_size"),glGetUniformLocation(i.custom,"player_color")};
     glUseProgram(i.world);constexpr const char* names[]={"texture0","texture1","palette","colorxlat","lumaram","gamma"};
@@ -116,6 +137,7 @@ GLScene::GLScene():impl_(std::make_unique<Impl>()) {
 }
 GLScene::~GLScene(){auto& i=*impl_;glDeleteProgram(i.world);glDeleteProgram(i.panel);glDeleteProgram(i.custom);glDeleteBuffers(1,&i.vbo);glDeleteBuffers(1,&i.panel_vbo);glDeleteBuffers(1,&i.reticle_vbo);glDeleteBuffers(1,&i.custom_vbo);glDeleteVertexArrays(1,&i.vao);glDeleteVertexArrays(1,&i.panel_vao);glDeleteVertexArrays(1,&i.reticle_vao);glDeleteVertexArrays(1,&i.custom_vao);glDeleteTextures(6,i.resources);glDeleteTextures(3,i.rasters);glDeleteTextures(1,&i.scanlines);}
 void GLScene::set_immersive(bool enabled){if(impl_->immersive!=enabled){impl_->immersive=enabled;auto frame=impl_->frame;impl_->frame={};prepare(std::move(frame),impl_->wider_view);}}
+void GLScene::set_view_fade(bool enabled){impl_->view_fade=enabled;}
 void GLScene::set_presentation_lens(const NativeLens& lens){impl_->presentation_override=lens;}
 void GLScene::set_reticle_size(float minimum_ratio,float shrink_distance){set_reticle_sizes(minimum_ratio,1,minimum_ratio,1,shrink_distance);}
 void GLScene::set_reticle_sizes(float ingame_min,float ingame_max,float custom_min,float custom_max,float shrink_distance){
@@ -162,12 +184,17 @@ void GLScene::prepare(std::shared_ptr<const NativeFrame> frame,bool wider_view) 
     glActiveTexture(GL_TEXTURE0);glPixelStorei(GL_UNPACK_ALIGNMENT,1);
     constexpr const char* names[]={"texture0","texture1","palette","colorxlat","luma","gamma"};
     if(i.usable)for(int n=0;n<6;n++)for(const auto& b:f.blobs)if(b.name==names[n]) {
-        const int rows=int((b.bytes.size()+2047)/2048);std::vector<uint8_t> padded(size_t(rows)*2048);std::copy(b.bytes.begin(),b.bytes.end(),padded.begin());
-        glBindTexture(GL_TEXTURE_2D,i.resources[n]);glTexImage2D(GL_TEXTURE_2D,0,GL_R8UI,2048,rows,0,GL_RED_INTEGER,GL_UNSIGNED_BYTE,padded.data());
+        const Impl::UploadShape shape{2048,GLsizei((b.bytes.size()+2047)/2048),GL_R8UI,GL_RED_INTEGER,GL_UNSIGNED_BYTE,false};
+        auto& cache=i.resource_uploads[n];if(cache.matches(b.bytes,shape))continue;
+        std::vector<uint8_t> padded(size_t(shape.height)*2048);std::copy(b.bytes.begin(),b.bytes.end(),padded.begin());
+        glBindTexture(GL_TEXTURE_2D,i.resources[n]);glTexImage2D(GL_TEXTURE_2D,0,shape.internal,shape.width,shape.height,0,shape.format,shape.type,padded.data());
+        cache.remember(b.bytes,shape);
     }
-    if(f.background.size()==size_t(f.width)*f.height)i.raster(i.rasters[0],f.background,false);
-    if(f.foreground.size()==size_t(f.width)*f.height)i.raster(i.rasters[1],f.foreground,true);
-    if(f.native.size()==size_t(f.width)*f.height)i.raster(i.rasters[2],f.native,false);
+    if(f.width>0&&f.height>0) {
+        if(f.background.size()==size_t(f.width)*f.height)i.raster(0,f.background,false);
+        if(f.foreground.size()==size_t(f.width)*f.height)i.raster(1,f.foreground,true);
+        if(f.native.size()==size_t(f.width)*f.height)i.raster(2,f.native,false);
+    }
     if(i.usable) {
         // Two headers per source polygon, then compact records for its native
         // scanline spans and its original near-clipped ring. Integer offsets
@@ -238,6 +265,7 @@ void GLScene::draw(const glm::mat4& vp,float scale,float distance) {
     std::array<ReticleDrawPolicy,2> policy;
     for(unsigned player=0;player<2;player++)policy[player]=reticle_draw_policy(i.reticle_mode,i.reticle_gameplay,i.reticle_count[player]>0,bool(i.reticle_targets[player]));
     glUniform1i(i.w.reticle_pass,GL_FALSE);glUniform2i(i.w.reticle_mask,policy[0].suppress_native,policy[1].suppress_native);
+    glUniform1i(i.w.view_fade,i.view_fade&&i.wider_view);glUniform2f(i.w.source_size,i.frame->width,i.frame->height);
     glUniform1f(i.w.hud_size,effective_hud_size(i.hud_size,i.immersive&&i.wider_view,i.hud_gameplay,i.hud_service,i.usable));
     glUniform1f(i.w.scale,scale);glUniform1f(i.w.distance,distance);glUniform1i(i.w.immersive,i.immersive);glBindVertexArray(i.vao);
     for(int n=0;n<6;n++){glActiveTexture(GL_TEXTURE0+n);glBindTexture(GL_TEXTURE_2D,i.resources[n]);}

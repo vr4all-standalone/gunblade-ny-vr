@@ -13,7 +13,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_ANDROID_LIBS = {'libmain.so', 'libSDL2.so', 'libc++_shared.so', 'libgunblade_xr.so', 'libgunblade_audio.so', 'libopenxr_loader.so'}
 REQUIRED_WINDOWS = {'gunblade.exe', 'gunblade_xr.dll', 'openxr_loader.dll'}
-VERSION = '0.1.0-beta'
+VERSION = '0.1.8-beta'
 PRIVATE_ROOT = Path('D:/VR4ALL-Gunblade-Build')
 VALIDATION = {'development_build': True, 'physical_headset_validation': 'untested',
               'quest3_validation': 'untested', 'quest3s_validation': 'untested',
@@ -136,6 +136,10 @@ def check_windows(path):
 def windows_components(engine, host, loader, mingw, readobj):
     """Resolve the portable PE import closure, including the dynamically loaded XR loader."""
     queue = [(engine, engine.name), (host, host.name), (loader, 'openxr_loader.dll')]
+    # The adaptive worker is opened dynamically by the engine, so PE import
+    # scanning cannot discover it. Include its own import closure when built.
+    audio = host.with_name('gunblade_audio.dll')
+    if audio.is_file(): queue.append((audio, audio.name))
     pending = {name.casefold() for _, name in queue}
     components = {}
     aliases = {loader.name.casefold(): loader}
@@ -155,8 +159,10 @@ def windows_components(engine, host, loader, mingw, readobj):
             if dependency is None:
                 raise ValueError(f'Unresolved Windows dependency {name} imported by {source.name}')
             pending.add(key); queue.append((dependency, name))
-    for source, required in [(host, {'gunblade_xr_start', 'gunblade_xr_stop'}),
-                             (loader, {'xrGetInstanceProcAddr'})]:
+    dynamic_exports = [(host, {'gunblade_xr_start', 'gunblade_xr_stop'}),
+                       (loader, {'xrGetInstanceProcAddr'})]
+    if audio.is_file(): dynamic_exports.append((audio, {'gunblade_audio_create','gunblade_audio_push','gunblade_audio_read','gunblade_audio_pause','gunblade_audio_stats','gunblade_audio_destroy'}))
+    for source, required in dynamic_exports:
         exports = subprocess.run([str(readobj), '--coff-exports', str(source)], check=True, text=True, capture_output=True).stdout
         names = {name.strip() for name in re.findall(r'^\s*Name: (.+)$', exports, re.MULTILINE)}
         if not required <= names:
@@ -176,7 +182,8 @@ def windows(engine, host, loader, mingw, readobj, output):
             shutil.copy2(source, folder/target_name)
         for source in ['tools/launch-pcvr.ps1', 'tools/run-pcvr.cmd', 'CREDITS.md', 'LICENSE', 'engine-lock.json', 'game-set.json', 'README.md',
                        'docs/platform-notes.md', 'docs/design.md', 'docs/implementation-plan.md',
-                       'docs/native-state-evidence.md', 'docs/validation.md', 'docs/performance.md', 'docs/native-reticles.md']:
+                       'docs/native-state-evidence.md', 'docs/validation.md', 'docs/performance.md', 'docs/native-reticles.md',
+                       'docs/settings-menu.md', 'docs/native-game-options.md']:
             target = folder/(Path(source).name if source.startswith('tools/') else source)
             target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(ROOT/source, target)
         for directory in ['assets', 'licenses']:

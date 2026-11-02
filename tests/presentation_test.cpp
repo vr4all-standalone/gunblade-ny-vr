@@ -3,6 +3,9 @@
 #include "../native/launch_policy.h"
 #include "../native/settings_io.h"
 #include "../native/shared/glb_mesh.h"
+#include "../native/gun_effects.h"
+#include "../native/gun_pose.h"
+#include "../native/shared/xr_panel.h"
 #include <glad/gl.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <cstdlib>
@@ -23,18 +26,20 @@ int main(int argc,char** argv){
     }
     GLContext context;Presentation ui;Settings settings;SharedRuntime runtime;PresentationInput input;
     {
-        _putenv_s("GUNBLADE_SETTINGS","hud-menu-test.ini");Presentation hudmenu;Settings values;SharedRuntime isolated;PresentationInput buttons;double tick=0;
+        _putenv_s("GUNBLADE_SETTINGS","hud-menu-test.ini");Presentation hudmenu;Settings values;SharedRuntime isolated;PresentationInput buttons;buttons.hands[0].tracked=true;double tick=0;
         auto update=[&]{tick+=.05;hudmenu.update(buttons,values,isolated,tick);};
-        auto step=[&](glm::vec2 direction){buttons.stick=direction;update();buttons.stick={};update();};
+        auto step=[&](glm::vec2 direction){buttons.sticks[0]=direction;update();buttons.sticks[0]={};update();};
         update();buttons.toggle=true;update();buttons.toggle=false;update();
-        for(int i=0;i<14;i++)step({0,-1});
-        step({1,0});check(values.hud_size==1.05f,"HUD size immediately after distance changes in5% steps");
+        auto seek=[&](MenuAction action){for(int i=0;i<32&&hudmenu.selected_action()!=action;i++)step({0,-1});check(hudmenu.selected_action()==action,"semantic menu target reachable");};
+        auto select=[&]{buttons.hands[0].start=true;update();buttons.hands[0].start=false;update();};
+        seek(MenuAction::TabWorld);select();seek(MenuAction::OpenWorldAdvanced);select();seek(MenuAction::HudSize);
+        step({1,0});check(values.hud_size==1.05f,"HUD size in Advanced world changes in5% steps");
         for(int i=0;i<30;i++)step({1,0});check(values.hud_size==2,"HUD size clamps at200%");
         for(int i=0;i<40;i++)step({-1,0});check(values.hud_size==.5f,"HUD size clamps at50%");
         std::ifstream file("hud-menu-test.ini");auto cold=read_settings(file);file.close();check(cold.hud_size==.5f,"actual HUD menu save/load");
         check(values.world_scale==Settings{}.world_scale&&values.panel_distance==Settings{}.panel_distance&&values.p1_hand==Settings{}.p1_hand,"HUD menu does not change world, distance or hand");
-        for(int i=0;i<9;i++)step({0,1});step({1,0});check(values.p1_hand==1&&values.hud_size==.5f,"hand menu transition retains HUD preference");
-        for(int i=5;i<20;i++)step({0,-1});buttons.hands[0].start=true;update();buttons.hands[0].start=false;update();check(values.hud_size==1&&values.p1_hand==Settings{}.p1_hand,"Reset restores HUD100 and hand defaults");
+        seek(MenuAction::TabSystem);select();seek(MenuAction::TwoPlayers);step({1,0});check(values.p1_hand==1&&values.hud_size==.5f,"hand menu transition retains HUD preference");
+        seek(MenuAction::ResetDefaults);select();seek(MenuAction::Confirm);select();check(values.hud_size==1&&values.p1_hand==Settings{}.p1_hand,"Reset restores HUD100 and hand defaults");
         std::ifstream resetfile("hud-menu-test.ini");auto resetcold=read_settings(resetfile);resetfile.close();check(resetcold.hud_size==1&&resetcold.world_scale==.08f,"actual Reset persists HUD100 and world size0.08");
         std::filesystem::remove("hud-menu-test.ini");_putenv_s("GUNBLADE_SETTINGS","");
     }
@@ -43,19 +48,21 @@ int main(int argc,char** argv){
         auto settings_file=std::filesystem::current_path()/"reticle-menu-test.ini";
         const char* previous=std::getenv("GUNBLADE_SETTINGS");std::string previous_name=previous?previous:"";
         _putenv_s("GUNBLADE_SETTINGS",settings_file.string().c_str());
-        Presentation tuning;PresentationInput buttons;Settings values;SharedRuntime isolated;double tick=0;
+        Presentation tuning;PresentationInput buttons;buttons.hands[0].tracked=true;Settings values;SharedRuntime isolated;double tick=0;
         tuning.update(buttons,values,isolated,tick++);buttons.toggle=true;tuning.update(buttons,values,isolated,tick++);
         buttons.toggle=false;tuning.update(buttons,values,isolated,tick++);
-        auto step=[&](glm::vec2 stick){buttons.stick=stick;tuning.update(buttons,values,isolated,tick++);buttons.stick={};tuning.update(buttons,values,isolated,tick++);};
-        for(int i=0;i<7;i++)step({0,-1});
+        auto step=[&](glm::vec2 stick){buttons.sticks[0]=stick;tuning.update(buttons,values,isolated,tick++);buttons.sticks[0]={};tuning.update(buttons,values,isolated,tick++);};
+        auto seek=[&](MenuAction action){for(int i=0;i<32&&tuning.selected_action()!=action;i++)step({0,-1});check(tuning.selected_action()==action,"semantic reticle target reachable");};
+        auto select=[&]{buttons.hands[0].start=true;tuning.update(buttons,values,isolated,tick++);buttons.hands[0].start=false;tuning.update(buttons,values,isolated,tick++);};
+        seek(MenuAction::TabGun);select();seek(MenuAction::Reticle);
         step({1,0});check(values.reticle_mode==ReticleMode::Custom,"Reticle selector cycles from In-game to Custom");
         step({1,0});check(values.reticle_mode==ReticleMode::None,"Reticle selector includes None");
         step({-1,0});check(values.reticle_mode==ReticleMode::Custom,"Reticle selector cycles backward");
-        step({0,-1});
+        seek(MenuAction::OpenGunAdvanced);select();seek(MenuAction::ReticleMinimum);
         step({1,0});check(values.reticle_custom_min_size==.23f&&values.reticle_min_size==.22f,"Custom minimum changes without changing In-game minimum");
-        step({0,-1});step({1,0});
+        seek(MenuAction::ReticleMaximum);step({1,0});
         check(values.reticle_custom_max_size==1.05f&&values.reticle_max_size==1.f,"Custom maximum changes in five-percent steps without changing In-game maximum");
-        step({0,-1});step({1,0});
+        seek(MenuAction::ReticleDistance);step({1,0});
         check(values.reticle_shrink_distance==6.8f,"menu Reticle shrink distance changes its own saved value in tenths of a metre");
         check(values.haptics==.65f&&values.world_scale==.08f,"reticle controls do not alter haptics or world size after inserting menu rows");
         std::ifstream saved(settings_file);auto restored=read_settings(saved);saved.close();
@@ -78,6 +85,61 @@ int main(int argc,char** argv){
     auto brand=render(true),menu=render(false);size_t changed=0;
     for(size_t i=0;i<brand.size();i+=4)if(brand[i]!=menu[i]||brand[i+1]!=menu[i+1]||brand[i+2]!=menu[i+2])++changed;
     check(changed>1000,"after the timed splash, an open loading menu must draw over the brand image");
+    {
+        // Reproduce the reported bug through the actual presentation: menu beams
+        // previously bypassed the selected thickness with a constant width.
+        input.toggle=false;input.hands[0].tracked=true;
+        input.poses[0]=glm::translate(glm::mat4(1),glm::vec3(-.25f,-.2f,-.35f));
+        ui.update(input,settings,runtime,.3);
+        auto beam=[&](int width){settings.laser_thickness=width;glDepthMask(GL_TRUE);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+            ui.draw(vp,settings,GameState{},true,1,false);std::vector<uint8_t> pixels(256*256*4);
+            glReadPixels(0,0,256,256,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());return pixels;};
+        auto normal=beam(0),five=beam(2);
+        check(normal!=five,"actual settings pointer visibly follows laser thickness");
+        settings.laser_thickness=0;
+    }
+    {
+        // Contact point must remain bright on top of the menu surface, rather
+        // than being painted first and covered by the panel's dark cards.
+        const auto layout=vr::xr::settingsLayout();
+        glm::vec3 target{(.84f-.5f)*layout.width,-.1f+(.5f-.89f)*layout.height,-1.2f};
+        glm::vec3 from{.25f,-.25f,-.35f};
+        auto aim=glm::inverse(glm::lookAt(from,target,glm::vec3(0,1,0)));
+        auto local_muzzle=ui.muzzle(glm::mat4(1),settings);
+        aim[3]=glm::vec4(from-glm::vec3(aim*glm::vec4(local_muzzle,0)),1);
+        input.poses[0]=aim*glm::rotate(glm::mat4(1),glm::radians(10.f),glm::vec3(1,0,0));
+        ui.update(input,settings,runtime,.4);settings.laser=false;
+        auto image=[&]{glDepthMask(GL_TRUE);glClearColor(0,0,0,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+            ui.draw(vp,settings,GameState{},true,1,false);std::vector<uint8_t> pixels(256*256*4);glReadPixels(0,0,256,256,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());return pixels;};
+        auto screen=vp*glm::vec4(target,1);screen/=screen.w;
+        int x=int((screen.x+1)*128),y=int((screen.y+1)*128);
+        auto brightness=[&](const auto& pixels){int light{};for(int dy=-2;dy<=2;dy++)for(int dx=-2;dx<=2;dx++){
+            auto at=((y+dy)*256+x+dx)*4;light=std::max(light,std::min({int(pixels[at]),int(pixels[at+1]),int(pixels[at+2])}));}return light;};
+        auto contact_image=image();
+        check(brightness(contact_image)>245,"menu laser has a clear white contact core drawn over the UI, including gameplay Laser Off");
+        input.poses[0]=glm::rotate(glm::mat4(1),glm::pi<float>(),glm::vec3(0,1,0));ui.update(input,settings,runtime,.5);
+        check(brightness(image())<200,"menu contact indicator disappears when the active ray misses");
+        input.poses[0]=aim*glm::rotate(glm::mat4(1),glm::radians(10.f),glm::vec3(1,0,0));input.focused=false;ui.update(input,settings,runtime,.6);
+        check(brightness(image())<200,"menu contact indicator disappears on focus loss");
+        input.focused=true;input.hands[0].tracked=false;ui.update(input,settings,runtime,.7);
+        check(brightness(image())<200,"menu contact indicator disappears when tracking is lost");
+        input.hands[0].tracked=true;ui.update(input,settings,runtime,.8);
+        settings.laser=true;
+    }
+    {
+        // Render the CM-derived line independently of UI/gun occlusion: verify
+        // width, distance fade, additive colour and the three-metre cap.
+        GunEffects line;auto projection=glm::ortho(-.05f,.05f,-.4f,.4f,.1f,10.f);
+        auto capture=[&](int width,float reach=0.7f){glDepthMask(GL_TRUE);glClearColor(0,0,0,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+            line.laser(projection,{0,0,0},{0,-.35f,-1},{0,-.35f+reach,-1},laser_half_width(width,true),{1,.08f,.05f});
+            std::vector<uint8_t> pixels(256*256*4);glReadPixels(0,0,256,256,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());return pixels;};
+        auto normal=capture(0),twice=capture(1),five=capture(2),ten=capture(3);
+        auto energy=[](const auto& pixels){uint64_t sum{};for(size_t i=0;i<pixels.size();i+=4)sum+=pixels[i];return sum;};
+        check(energy(normal)>0&&energy(twice)>energy(normal)*1.5&&energy(five)>energy(twice)*2&&energy(ten)>energy(five)*1.5,"CM line Normal/2x/5x/10x visibly scale actual rendered width");
+        check(normal[(50*256+127)*4]>normal[(200*256+127)*4]+50,"CM line fades from alpha .55 to zero along its length");
+        check(capture(0,4)==capture(0,8),"CM line has a three-metre visible cap");
+        check(glGetError()==GL_NO_ERROR,"CM beam GPU state is valid");
+    }
     {
         // Native credits arrive during mode 11, before Start is permitted.
         // Preserve the already-drawn native image instead of covering it again.

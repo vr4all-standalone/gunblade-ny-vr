@@ -340,6 +340,7 @@ struct Host {
         Hands inputs{};ExtraControls extras;PresentationInput display;display.toggle=button(menu,0);display.head=glm::inverse(origin)*head_pose;
         auto now=std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
         ui.prepare(settings,&shared);
+        scene.set_view_fade(settings.wider_view&&settings.wider_view_fade&&!ui.service()&&!shared.game_options_busy);
         if(frame&&frame->complete){scene.prepare(frame,settings.wider_view);scene.set_presentation_lens(display_lens(*frame,settings));}
         auto inv=glm::inverse(origin);
         for(int i=0;i<2;i++) {
@@ -349,7 +350,7 @@ struct Host {
             display.poses[i]=inv*pose(loc.pose);
             XrActionStateGetInfo sg{XR_TYPE_ACTION_STATE_GET_INFO};sg.action=stick;sg.subactionPath=hands[i];XrActionStateVector2f stick_state{XR_TYPE_ACTION_STATE_VECTOR2F};check(xrGetActionStateVector2f(session,&sg,&stick_state),"Stick state");
             if(stick_state.isActive&&std::abs(stick_state.currentState.x)+std::abs(stick_state.currentState.y)>std::abs(display.stick.x)+std::abs(display.stick.y))display.stick={stick_state.currentState.x,stick_state.currentState.y};
-            if(stick_state.isActive)extras.stick[i]={stick_state.currentState.x,stick_state.currentState.y};
+            if(stick_state.isActive){extras.stick[i]={stick_state.currentState.x,stick_state.currentState.y};display.sticks[i]={stick_state.currentState.x,stick_state.currentState.y};}
             extras.click[i]=button(click,i);
             if(h.tracked&&frame&&frame->complete) {
                 h.aim={0,0,true,false}; // Keep a tracked rear-facing ray outside the native view.
@@ -365,13 +366,12 @@ struct Host {
         if(service_click.edge(extras.click[1],focused&&ui.service()&&!ui.open())){ui.toggle_service_guns();shared.release_inputs();}
         auto shortcut=shortcuts.update(now,extras,inputs,settings,focused&&!ui.open()&&!ui.service());
         if(shortcut.recenter)origin_set=false;
-        if(shortcut.laser)settings.laser=!settings.laser;
         if(shortcut.laser){const char* file=std::getenv("GUNBLADE_SETTINGS");std::ofstream output(file?file:"gunblade-settings.ini");if(output)write_settings(output,settings);}
         const auto native=shared.native_snapshot();const auto& state=native.state;
         display.hands=inputs;display.focused=focused;ui.update(display,settings,shared,now);
         shared.service_active=ui.service();
         if(ui.recenter_requested())origin_set=false;
-        auto input=policy.update(now,inputs,state,settings,focused,ui.open()||ui.service(),&native.ownership);
+        auto input=policy.update(now,inputs,state,settings,focused,ui.open()||ui.service()||shared.game_options_busy,&native.ownership);
         if(!ui.service())native_aim.apply(input,inputs,native.calibration);
         else native_aim.suspend();
         auto gun_test=service_guns.update(inputs,settings,focused&&ui.service()&&ui.service_guns()&&!ui.open());
@@ -387,7 +387,7 @@ struct Host {
             check(xrApplyHapticFeedback(session,&hi,reinterpret_cast<const XrHapticBaseHeader*>(&vibration)),"Shot haptic");
         }
         // Branding gates cabinet input, not the native opening sequence.
-        shared.pause_requested=ui.open()||session_state!=XR_SESSION_STATE_FOCUSED;
+        shared.pause_requested=menu_pauses_native(ui.open(),session_state==XR_SESSION_STATE_FOCUSED,state);
     }
     void run() {
         double controls_ms{},prepare_ms{},draw_ms{};uint32_t timing_frames{};
@@ -400,7 +400,7 @@ struct Host {
                     auto& e=*reinterpret_cast<XrEventDataSessionStateChanged*>(&event);session_state=e.state;log("Session state "+std::to_string(e.state));
                     if(e.state!=XR_SESSION_STATE_FOCUSED) {
                         policy.suspend();native_aim.suspend();shortcuts.suspend();operator_controls.suspend();service_guns.suspend();menu_hold_policy.suspend();service_click.suspend();ui.suspend();shared.pause_requested=true;
-                        shared.release_inputs();
+                        shared.game_options_focused=false;shared.release_inputs();
                     }
                     if(e.state==XR_SESSION_STATE_READY) {
                         XrSessionBeginInfo begin{XR_TYPE_SESSION_BEGIN_INFO};begin.primaryViewConfigurationType=XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;check(xrBeginSession(session,&begin),"BeginSession");running=true;

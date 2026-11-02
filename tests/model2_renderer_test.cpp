@@ -21,6 +21,14 @@ static void GLAD_API_PTR observe_draw_arrays(GLenum mode,GLint first,GLsizei cou
     if(glGetUniformLocation(GLuint(current),"source_scanlines")>=0)++observed_world_draw_calls;
     ++observed_draw_calls;original_draw_arrays(mode,first,count);
 }
+static PFNGLTEXIMAGE2DPROC original_tex_image_2d;
+static unsigned observed_resource_uploads,observed_raster_uploads;
+static void GLAD_API_PTR observe_tex_image_2d(GLenum target,GLint level,GLint internal,GLsizei width,GLsizei height,
+    GLint border,GLenum format,GLenum type,const void* pixels) {
+    if(internal==GL_R8UI)++observed_resource_uploads;
+    if(internal==GL_RGBA8)++observed_raster_uploads;
+    original_tex_image_2d(target,level,internal,width,height,border,format,type,pixels);
+}
 #endif
 
 using namespace gunblade;
@@ -101,6 +109,88 @@ static NativePolygon quad(float depth=100) {
     p.vertices={NativeVertex{-10000,10000,depth,0,0},NativeVertex{10000,10000,depth,8,0},
         NativeVertex{10000,-10000,depth,8,8},NativeVertex{-10000,-10000,depth,0,8}};return p;
 }
+#ifdef GUNBLADE_RENDERER_GL_TEST
+static void upload_cache_tests() {
+    auto fixture=frame();fixture.polygons={quad()};
+    const auto count=size_t(fixture.width)*fixture.height;
+    fixture.background.assign(count,0xff102030);
+    fixture.foreground.assign(count,0);
+    fixture.native.assign(count,0xff345678);
+    // Read the entire real framebuffer in both eyes. A fresh renderer is the
+    // uncached reference for every transition, including native fallback.
+    auto render=[](GLScene& scene,const NativeFrame& f) {
+        std::vector<uint8_t> result(2*496*384*4);
+        const auto& l=f.lens;const float n=.001f;
+        const auto projection=glm::frustum(float(-l.cx/l.fx*n),float((f.width-l.cx)/l.fx*n),
+            float(-(f.height-l.cy)/l.fy*n),float(l.cy/l.fy*n),n,100.f);
+        unsigned eye_index=0;
+        for(float eye:{-.032f,.032f}) {
+            glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+            scene.draw(projection*glm::translate(glm::mat4(1),glm::vec3(-eye,0,0)),.01f,2.f);
+            glReadPixels(0,0,496,384,GL_RGBA,GL_UNSIGNED_BYTE,result.data()+eye_index++*496*384*4);
+        }
+        return result;
+    };
+    GLScene cached;
+    auto verify=[&](const NativeFrame& f,unsigned resources,unsigned rasters) {
+        const auto snapshot=std::make_shared<const NativeFrame>(f);
+        observed_resource_uploads=observed_raster_uploads=0;
+        original_tex_image_2d=glad_glTexImage2D;glad_glTexImage2D=observe_tex_image_2d;
+        cached.prepare(snapshot);glad_glTexImage2D=original_tex_image_2d;
+        if(observed_resource_uploads!=resources||observed_raster_uploads!=rasters)
+            std::cerr<<"Upload mismatch: resources "<<observed_resource_uploads<<" expected "<<resources
+                <<", rasters "<<observed_raster_uploads<<" expected "<<rasters<<'\n';
+        assert(observed_resource_uploads==resources&&observed_raster_uploads==rasters);
+        assert(cached.prepared_frame()==snapshot);
+        const auto actual=render(cached,f);
+        {GLScene reference;reference.prepare(snapshot);assert(actual==render(reference,f));}
+        assert(glGetError()==GL_NO_ERROR);
+        return actual;
+    };
+    const auto original=verify(fixture,6,3);
+    const std::weak_ptr<const NativeFrame> old_snapshot=cached.prepared_frame();
+    ++fixture.sequence;fixture.time+=1./60;
+    assert(original==verify(fixture,0,0)); // Distinct immutable snapshot, identical bytes.
+    assert(old_snapshot.expired()); // The cache does not retain previous full snapshots.
+    auto geometry=fixture;geometry.polygons[0].luma=128;
+    assert(original!=verify(geometry,0,0));verify(fixture,0,0); // Material/geometry still rebuilds.
+    for(unsigned n=0;n<6;n++) {
+        fixture.blobs[n].bytes.back()^=1;
+        verify(fixture,1,0); // Every resource is compared, including unused bytes.
+    }
+    const auto before_palette=verify(fixture,0,0);
+    fixture.blobs[2].bytes[8192]^=31;
+    assert(before_palette!=verify(fixture,1,0)); // A live palette change reaches both eyes.
+    for(unsigned n=0;n<3;n++) {
+        auto& raster=n==0?fixture.background:n==1?fixture.foreground:fixture.native;
+        raster[191*fixture.width+248]=0xff12ab34;
+        verify(fixture,0,1);
+    }
+    // Exact source length matters even when the added bytes are zero padding;
+    // crossing a resource row boundary also changes its GPU texture shape.
+    fixture.blobs[5].bytes.resize(257);verify(fixture,1,0);
+    fixture.blobs[5].bytes.resize(2049);verify(fixture,1,0);
+    fixture.blobs[0].bytes.resize(1048576);fixture.blobs[1].bytes.resize(1048576);verify(fixture,2,0);
+    // The same raster bytes in a different width/height need new definitions.
+    fixture.width=248;fixture.height=768;fixture.lens={248,768,400,400,124,383};verify(fixture,0,3);
+    fixture.width=496;fixture.height=384;fixture.lens={496,384,400,400,248,191};verify(fixture,0,3);
+    auto fallback=fixture;fallback.rejected=1;verify(fallback,0,0);
+    fallback.native[191*fallback.width+248]=0xffabcdef;verify(fallback,0,1);
+    auto missing=fixture;missing.blobs.clear();verify(missing,0,1);
+    auto invalid=fixture;invalid.blobs[5].bytes.resize(255);verify(invalid,0,0);
+    verify(fixture,0,0); // Missing/invalid material never invalidates unchanged GPU content.
+    auto no_rasters=fixture;no_rasters.background.clear();no_rasters.foreground.clear();no_rasters.native.clear();verify(no_rasters,0,0);
+    auto malformed=fixture;malformed.background.pop_back();malformed.foreground.pop_back();malformed.native.pop_back();verify(malformed,0,0);
+    verify(fixture,0,0); // Restoring valid byte-identical rasters can reuse their definitions.
+    // Zero is opaque black for background/native, but transparent foreground.
+    auto zeros=fixture;zeros.background.assign(count,0);zeros.foreground.assign(count,0);zeros.native.assign(count,0);
+    verify(zeros,0,3);zeros.rejected=1;verify(zeros,0,0);
+    auto incomplete=fixture;incomplete.complete=false;verify(incomplete,0,0);
+    verify(fixture,0,3);
+    cached.prepare({});verify(fixture,0,0);
+    std::cout<<"Model 2 exact-byte upload cache: distinct snapshots, all6 resources/all3 rasters, shape/alpha/fallback and stereo equivalence passed\n";
+}
+#endif
 static NativePolygon camera_quad(double yaw_degrees=0,double distance=2,double half_width=.25) {
     auto p=quad();p.focus={400,400};
     const double yaw=yaw_degrees*3.14159265358979323846/180,s=std::sin(yaw),c=std::cos(yaw);
@@ -355,6 +445,7 @@ int main() {
     glViewport(0,0,f.width,f.height);auto l=f.lens;const float n=.001f;
     auto projection=glm::frustum(float(-l.cx/l.fx*n),float((f.width-l.cx)/l.fx*n),float(-(f.height-l.cy)/l.fy*n),float(l.cy/l.fy*n),n,100.f);
     auto pixel=[&](int x,int y){uint8_t p[4];glReadPixels(x,f.height-1-y,1,1,GL_RGBA,GL_UNSIGNED_BYTE,p);return 0xff000000u|(unsigned(p[0])<<16)|(unsigned(p[1])<<8)|p[2];};
+    upload_cache_tests();
     {
         // A target two metres away replaces only a positively identified native
         // ring. Unknown window-4/focus-600 HUD remains at its original location.
@@ -693,6 +784,18 @@ int main() {
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);scene.draw(projection*side_view,.01f,3.f);assert(pixel(248,191)==0xff000000u);
     }
     assert(glGetError()==GL_NO_ERROR);glDeleteFramebuffers(1,&framebuffer);glDeleteTextures(1,&color);glDeleteRenderbuffers(1,&depth);
+    {
+        // A new GL context/renderer must populate its own GPU textures even
+        // when the prior context displayed exactly the same native bytes.
+        GLContext recreated;
+        auto restored=frame();restored.polygons={quad()};
+        const auto pixels=size_t(restored.width)*restored.height;
+        restored.background.assign(pixels,0);restored.foreground.assign(pixels,0);restored.native.assign(pixels,0);
+        GLScene scene;observed_resource_uploads=observed_raster_uploads=0;
+        original_tex_image_2d=glad_glTexImage2D;glad_glTexImage2D=observe_tex_image_2d;
+        scene.prepare(std::make_shared<const NativeFrame>(restored));glad_glTexImage2D=original_tex_image_2d;
+        assert(observed_resource_uploads==6&&observed_raster_uploads==3&&glGetError()==GL_NO_ERROR);
+    }
     std::cout<<"Model 2 production OpenGL material/stereo/fallback tests passed\n";
 #endif
     f=frame();f.polygons={quad()};f.rejected=1;

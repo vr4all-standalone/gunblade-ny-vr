@@ -52,12 +52,18 @@ class ShortcutPolicy {
     std::array<ButtonLatch,2> click_;
 public:
     void suspend(){for(auto& b:click_)b.suspend();}
-    ShortcutResult update(double,const ExtraControls& in,const Hands& hands,Settings&,bool enabled) {
+    ShortcutResult update(double,const ExtraControls& in,const Hands& hands,Settings& settings,bool enabled) {
         ShortcutResult out;
         for(int h=0;h<2;h++) {
             bool active=enabled&&hands[h].tracked;
             bool edge=click_[h].edge(in.click[h],active);
             if(h==0)out.recenter=edge;else out.laser=edge;
+        }
+        if(out.laser) {
+            const bool visible=settings.laser||settings.reticle_mode!=ReticleMode::None;
+            set_crosshair_mode(settings,visible?ReticleMode::None:
+                settings.reticle_restore_mode==ReticleMode::Custom?ReticleMode::Custom:ReticleMode::Ingame);
+            settings.laser=!visible;
         }
         return out;
     }

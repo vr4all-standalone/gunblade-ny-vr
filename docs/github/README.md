@@ -9,7 +9,7 @@
 ![Quest 3 / 3S and Windows OpenXR](https://img.shields.io/badge/Platforms-Quest_3_%2F_3S_%C2%B7_PC_VR_OpenXR-blue?style=for-the-badge)
 ![Original game required](https://img.shields.io/badge/Your_Game-Gunblade_NY_Revision_A-orange?style=for-the-badge)
 
-**[Download the Quest APK, Windows OpenXR build, source and checksums](https://github.com/vr4all-standalone/gunblade-ny-vr/releases/tag/v0.1.0-beta)**
+**[Download the Quest APK, Windows OpenXR build, source and checksums](https://github.com/vr4all-standalone/gunblade-ny-vr/releases/tag/v0.1.8-beta)**
 
 **[🌐 VR4ALL — Standalone VR Mod Installer](https://github.com/vr4all-standalone/vr4all-standalone)**  
 **[☕ Donate to VR4ALL](https://ko-fi.com/vr4all)**
@@ -22,11 +22,11 @@
 
 Gunblade NY VR brings Sega's original helicopter light-gun game into stereo VR with head tracking and tracked guns. It runs locally on Quest 3/3S; a Windows OpenXR build is available in the release. The original game's scenery, audio and rules come from your own game data.
 
-The development build has been played on a Quest 3S with stereo scenery, audio and solo Start. It supports the original automatic-fire trigger, two-player cabinet inputs, native targeting rings in the world, optional custom reticles, and the VR4ALL settings menu. The latest settings and PC VR hardware still need release acceptance.
+The port has been played on a Quest 3S with stereo scenery, audio, tracked guns, haptics and two-player hand ownership. It supports the original automatic-fire trigger, native targeting rings in the world, optional hollow-X crosshairs, and the VR4ALL settings menu. Click the right thumbstick to switch the laser and crosshair off or on together; switching them back on restores your chosen crosshair style.
 
 ## Your game files
 
-Bring your own **Gunblade NY Revision A** arcade data. The verified set is `gunblade.zip` with all 18 required payloads. A split set may also need `segabill.zip` in the same folder. No CHD is required. VR4ALL validates the actual files; this repository and its future downloads will not contain game data.
+Bring your own **Gunblade NY Revision A** arcade data. The verified set is `gunblade.zip` with all 18 required payloads. A split set may also need `segabill.zip` in the same folder. No CHD is required. VR4ALL validates the actual files; game data is not included in this repository or its downloads.
 
 ## Install
 
@@ -34,6 +34,6 @@ Use [VR4ALL](https://github.com/vr4all-standalone/vr4all-standalone/releases) to
 
 ## Development notes
 
-The Quest app name is **Gunblade NY - VR4ALL**. Quest 3S play has been observed; Quest 3 and Windows OpenXR physical play, extended stages and the newest settings are still being checked. Some heavy scenes run below full arcade speed and audio can sound rough. This is an independent fan project, not affiliated with Sega or Meta.
+The Quest app name is **Gunblade NY - VR4ALL**. Quest 3S gameplay has been tested. The new paired shortcut has automated persistence and control tests; this release's shortcut, Quest 3 hardware and Windows OpenXR hardware have not had a physical play check. Some heavy scenes can run below full arcade speed. This is an independent fan project, not affiliated with Sega or Meta.
 
 [Original flyer and banner attribution](docs/github/ARTWORK.md)

@@ -2,6 +2,7 @@
 #pragma once
 #include "cabinet_io.h"
 #include "reticle_mode.h"
+#include "world_presets.h"
 namespace gunblade {
 struct Aim {double u{.5},v{.5};bool valid{},inside{};};
 struct HandInput {bool tracked{},trigger{},start{},pump{};Aim aim;};
@@ -14,9 +15,16 @@ struct Settings {
     float world_scale{.08f},panel_distance{1.8f},hud_size{1.f},gun_angle{},gun_scale{1},haptics{.65f},view_fov{65};
     float reticle_min_size{.22f},reticle_max_size{1.f},reticle_custom_min_size{.22f},reticle_custom_max_size{1.f},reticle_shrink_distance{6.7f};
     ReticleMode reticle_mode{ReticleMode::Ingame};
-    bool laser{true},wider_view{true};int gun{};
+    ReticleMode reticle_restore_mode{ReticleMode::Ingame};
+    bool laser{true},wider_view{true},wider_view_fade{};int gun{};
+    int laser_thickness{0};WorldPreset world_preset{WorldPreset::Normal};
     BackgroundMode background{BackgroundMode::Original};
 };
+inline void set_crosshair_mode(Settings& settings,ReticleMode mode) {
+    if(settings.reticle_mode!=ReticleMode::None)settings.reticle_restore_mode=settings.reticle_mode;
+    settings.reticle_mode=mode;
+    if(mode!=ReticleMode::None)settings.reticle_restore_mode=mode;
+}
 // Populate only from separately verified native observations. In particular,
 // physical trigger state must never stand in for an accepted native shot.
 struct NativeState {
@@ -77,10 +85,13 @@ class InputPolicy {
     std::array<int,2> start_owner_{-1,-1};
     bool initialized_{},was_enabled_{},was_ready_{};
     uint8_t previous_joined_{};
-    int previous_layout_{0},solo_hand_{0};
+    int previous_layout_{0},solo_hand_{-1};
     double previous_time_{};
 public:
-    void suspend(){*this=InputPolicy{};}
+    void suspend(){
+        const int owner=solo_hand_,layout=previous_layout_;const uint8_t roster=previous_joined_;
+        *this=InputPolicy{};solo_hand_=owner;previous_layout_=layout;previous_joined_=roster;
+    }
     template<class State> CabinetInput update(double now,const Hands& hands,const State& state,
                         const Settings& settings,bool focused,bool menu,const ShotOwnership* ownership=nullptr) {
         NativeState native;native.valid=state.valid;native.start_ready=state.ready;
@@ -104,14 +115,22 @@ public:
         const bool session_changed=initialized_&&state.session!=previous_state_.session;
         const bool transition=!initialized_||enabled!=was_enabled_||joined!=previous_joined_||layout!=previous_layout_||session_changed;
         if(transition){blocked_={true,true};outside_pull_={};}
-        if(!initialized_||layout!=previous_layout_)solo_hand_=layout;
+        if(solo_hand_<0&&enabled)solo_hand_=joined==2?1-layout:layout;
         if(joined==3)solo_hand_=layout;
         else if(previous_joined_==3 && joined==2)solo_hand_=1-layout;
         const int previous_solo=solo_hand_;
         if(joined!=3&&enabled) {
             const int other=1-solo_hand_;
-            if(!hands[solo_hand_].trigger&&hands[other].tracked&&
-               (!hands[solo_hand_].tracked || (hands[other].trigger&&!previous_[other].trigger&&!transition)))solo_hand_=other;
+            const bool new_pull=hands[other].trigger&&!previous_[other].trigger&&!transition;
+            const bool current_pull=hands[solo_hand_].trigger&&!previous_[solo_hand_].trigger&&!transition;
+            if(hands[other].tracked&&(!hands[solo_hand_].tracked||(new_pull&&!current_pull)))solo_hand_=other;
+        }
+        // The first fresh Start chooses solo ownership independently of the
+        // configured two-player layout. Simultaneous Starts use that layout.
+        if(joined==0&&ready&&ready==was_ready_&&layout==previous_layout_&&!session_changed){
+            bool first[2]{};
+            for(int h=0;h<2;h++)first[h]=hands[h].tracked&&!start_waiting_[h]&&hands[h].start&&!previous_[h].start;
+            if(first[0]||first[1])solo_hand_=first[0]&&first[1]?layout:first[0]?0:1;
         }
         if(solo_hand_!=previous_solo&&previous_[solo_hand_].trigger)blocked_[solo_hand_]=true;
         if(joined==3)out.hand={layout,1-layout};
@@ -135,8 +154,10 @@ public:
             if(ready&&in.tracked&&!in.start)start_waiting_[h]=false;
             if(!in.start)start_owner_[h]=-1;
             if(ready&&in.tracked&&!start_waiting_[h]&&in.start&&!previous_[h].start) {
-                const int player=joined==0?0:(h==layout?0:1);
-                if(player==0 || joined==3 || ((joined&1)&&hands[0].tracked&&hands[1].tracked)) {
+                const int active=joined==2?1:0;
+                const int player=joined==0?0:joined==3?(h==layout?0:1):(h==solo_hand_?active:1-active);
+                const bool already_joined=(joined&(1<<player))!=0;
+                if(joined==0 || already_joined || joined==3 || (hands[0].tracked&&hands[1].tracked)) {
                     start_owner_[h]=player;
                     auto& pulse=pulses_[h];
                     if(pulse.player!=player || now-pulse.time>=.26)pulse={now,player};

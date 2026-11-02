@@ -11,6 +11,9 @@
 #include <memory>
 #include <limits>
 #include "SoundTouch.h"
+#if defined(GUNBLADE_AUDIO_DIAGNOSTICS) && GUNBLADE_AUDIO_DIAGNOSTICS
+#include "audio_capture.h"
+#endif
 
 namespace gunblade_audio_detail {
 class TempoController {
@@ -75,8 +78,8 @@ public:
     StretchCore() {
         sound_.setSampleRate(SampleRate);sound_.setChannels(Channels);
         sound_.setRate(1);sound_.setPitch(1);sound_.setTempo(1);
-        sound_.setSetting(SETTING_SEQUENCE_MS,32);
-        sound_.setSetting(SETTING_SEEKWINDOW_MS,8);
+        sound_.setSetting(SETTING_SEQUENCE_MS,40);
+        sound_.setSetting(SETTING_SEEKWINDOW_MS,16);
         sound_.setSetting(SETTING_OVERLAP_MS,8);
         sound_.setSetting(SETTING_USE_QUICKSEEK,0);
     }
@@ -108,6 +111,9 @@ struct Counters {
 };
 
 class AudioWorker {
+#if defined(GUNBLADE_AUDIO_DIAGNOSTICS) && GUNBLADE_AUDIO_DIAGNOSTICS
+    std::unique_ptr<AudioCapture> capture_;
+#endif
     std::array<InputBlock,InputSlots> input_;
     std::array<OutputSample,OutputCapacity> output_;
     alignas(64) std::atomic<uint64_t> input_head_{0},input_tail_{0};
@@ -198,16 +204,38 @@ class AudioWorker {
         }
     }
 public:
-    AudioWorker() {worker_=std::thread([this]{work();});}
-    ~AudioWorker() {stop_.store(true,std::memory_order_release);if(worker_.joinable())worker_.join();}
+    AudioWorker() {
+#if defined(GUNBLADE_AUDIO_DIAGNOSTICS) && GUNBLADE_AUDIO_DIAGNOSTICS
+        capture_=AudioCapture::from_environment();
+#endif
+        worker_=std::thread([this]{work();});
+    }
+    ~AudioWorker() {
+        stop_.store(true,std::memory_order_release);if(worker_.joinable())worker_.join();
+#if defined(GUNBLADE_AUDIO_DIAGNOSTICS) && GUNBLADE_AUDIO_DIAGNOSTICS
+        if(capture_)capture_->stop();
+#endif
+    }
     bool ready() const noexcept {return ready_.load(std::memory_order_acquire);}
     bool failed() const noexcept {return failed_.load(std::memory_order_acquire);}
     uint32_t push(const int16_t* data,uint32_t frames,double now) noexcept {
         if(!data || !frames)return 0;
         counters_.native.fetch_add(frames,std::memory_order_relaxed);
         const uint64_t control=control_.load(std::memory_order_acquire),epoch=control>>1;
-        if(control&1) {counters_.paused_input.fetch_add(frames,std::memory_order_relaxed);return 0;}
-        if(failed() || !std::isfinite(now)) {counters_.input_dropped.fetch_add(frames,std::memory_order_relaxed);return 0;}
+        if(control&1) {
+            counters_.paused_input.fetch_add(frames,std::memory_order_relaxed);
+#if defined(GUNBLADE_AUDIO_DIAGNOSTICS) && GUNBLADE_AUDIO_DIAGNOSTICS
+            if(capture_)capture_->push(data,frames,now,control,0);
+#endif
+            return 0;
+        }
+        if(failed() || !std::isfinite(now)) {
+            counters_.input_dropped.fetch_add(frames,std::memory_order_relaxed);
+#if defined(GUNBLADE_AUDIO_DIAGNOSTICS) && GUNBLADE_AUDIO_DIAGNOSTICS
+            if(capture_)capture_->push(data,frames,now,control,0);
+#endif
+            return 0;
+        }
         latest_push_now_.store(now,std::memory_order_relaxed);
         if(producer_epoch_!=epoch) {
             producer_epoch_=epoch;previous_push_=now;
@@ -228,6 +256,9 @@ public:
             counters_.input_blocks.fetch_add(1,std::memory_order_relaxed);accepted+=count;
         }
         counters_.input_dropped.fetch_add(frames-accepted,std::memory_order_relaxed);
+#if defined(GUNBLADE_AUDIO_DIAGNOSTICS) && GUNBLADE_AUDIO_DIAGNOSTICS
+        if(capture_)capture_->push(data,frames,now,control,accepted);
+#endif
         return accepted;
     }
     uint32_t read(int16_t* data,uint32_t frames,double now) noexcept {
@@ -245,6 +276,9 @@ public:
             counters_.output_dropped.fetch_add(discarded,std::memory_order_relaxed);
             counters_.paused.fetch_add(frames);
             counters_.requested.fetch_add(frames);
+#if defined(GUNBLADE_AUDIO_DIAGNOSTICS) && GUNBLADE_AUDIO_DIAGNOSTICS
+            if(capture_)capture_->read(data,frames,now,control,0,0,false);
+#endif
             callback_sequence_.fetch_add(1);return 0;
         }
         const bool running=running_epoch_.load(std::memory_order_acquire)==epoch;
@@ -258,6 +292,9 @@ public:
         counters_.output_dropped.fetch_add(discarded,std::memory_order_relaxed);
         counters_.delivered.fetch_add(delivered);
         const uint32_t missing=frames-delivered;
+#if defined(GUNBLADE_AUDIO_DIAGNOSTICS) && GUNBLADE_AUDIO_DIAGNOSTICS
+        uint32_t captured_warmup=0;
+#endif
         if(missing) {
             counters_.missing.fetch_add(missing);
             counters_.underrun_callbacks.fetch_add(1);
@@ -267,8 +304,14 @@ public:
                 timeout_epoch_.store(epoch,std::memory_order_relaxed);warming=false;
             }
             if(warming)counters_.warmup.fetch_add(missing);
+#if defined(GUNBLADE_AUDIO_DIAGNOSTICS) && GUNBLADE_AUDIO_DIAGNOSTICS
+            if(warming)captured_warmup=missing;
+#endif
         }
         counters_.requested.fetch_add(frames);
+#if defined(GUNBLADE_AUDIO_DIAGNOSTICS) && GUNBLADE_AUDIO_DIAGNOSTICS
+        if(capture_)capture_->read(data,frames,now,control,delivered,captured_warmup,running);
+#endif
         callback_sequence_.fetch_add(1);return delivered;
     }
     void pause(bool paused) noexcept {

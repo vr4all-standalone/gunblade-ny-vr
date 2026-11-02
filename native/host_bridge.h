@@ -42,7 +42,8 @@ template<class Machine> void poll_host(Machine& machine) {
     if(!vr_requested())return;
     start_host();auto& runtime=shared_runtime();
     if(runtime.quit_requested)machine.schedule_exit();
-    if(runtime.host_ready){if(runtime.pause_requested&&!machine.paused()){runtime.release_inputs();machine.pause();}else if(!runtime.pause_requested&&machine.paused())machine.resume();}
+    else if(runtime.take_game_options_reset_request())machine.schedule_soft_reset();
+    if(runtime.host_ready){const bool pause=runtime.engine_pause_requested();if(pause&&!machine.paused()){runtime.release_inputs();machine.pause();}else if(!pause&&machine.paused())machine.resume();}
     using Clock=std::chrono::steady_clock;static auto last=Clock::now();static double native_before=machine.time().as_double();
     auto now=Clock::now();static auto previous_poll=now;static bool previous_paused=machine.paused();static double paused_wall{};
     if(previous_paused)paused_wall+=std::chrono::duration<double>(now-previous_poll).count();
@@ -65,6 +66,7 @@ inline uint8_t system_input(uint8_t native) {
     using Clock=std::chrono::steady_clock;static Clock::time_point until{};
     if(shared_runtime().service_requested.exchange(false))until=Clock::now()+std::chrono::milliseconds(200);
     input.test=input.test||Clock::now()<until;
+    if(shared_runtime().game_options_busy){input={};until={};}
     return in0(native,input);
 }
 inline uint8_t trigger_input(uint8_t native){return vr_requested()?in1(native,cabinet_input()):native;}
@@ -73,6 +75,7 @@ template<class Read32> void native_tick(Read32 read) {
     if(!vr_requested())return;
     auto& runtime=shared_runtime();std::lock_guard lock(runtime.mutex);
     auto state=read_game_state(read);
+    runtime.tick_game_options(read,state);
     const bool had_players=runtime.state.players[0].joined()||runtime.state.players[1].joined();
     const bool has_players=state.players[0].joined()||state.players[1].joined();
     if((had_players&&!has_players&&!state.service)||(state.mode==11&&runtime.state.mode!=11))++runtime.session;
@@ -83,7 +86,7 @@ template<class Read32> void native_tick(Read32 read) {
     runtime.shot_ownership.update(state,runtime.state,runtime.engine_input);
     for(unsigned p=0;p<2;p++)runtime.calibration[p]=read_native_calibration(read,p);
     runtime.state=state;
-    runtime.engine_input=runtime.input_latch.update(runtime.input);
-    runtime.operator_latched=runtime.operator_latch.update(runtime.operator_pending.exchange(0));
+    runtime.engine_input=runtime.game_options_busy?CabinetInput{}:runtime.input_latch.update(runtime.input);
+
 }
 }

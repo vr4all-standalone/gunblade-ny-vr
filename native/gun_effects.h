@@ -52,7 +52,8 @@ in vec2 corner;in vec4 color;uniform int shape;uniform float angle;out vec4 resu
 void main(){float a=color.a;float r=length(corner);
 if(shape==0)a*=1.-smoothstep(0.,1.,r);
 else if(shape==1)a*=pow(1.-clamp(corner.x,0.,1.),1.6)*(1.-corner.y*corner.y);
-else {float rays=pow(abs(cos((atan(corner.y,corner.x)+angle)*3.)),10.);
+else if(shape==4)a*=1.-smoothstep(.25,1.,r);
+else if(shape==2){float rays=pow(abs(cos((atan(corner.y,corner.x)+angle)*3.)),10.);
 a*=clamp((1.-r)*(.25+1.6*rays)+(1.-smoothstep(0.,.4,r)),0.,1.);}
 result=vec4(color.rgb,a);})");
         program_=gl_CompileAndLink(vs.generate().c_str(),fs.generate().c_str());if(!program_)return false;
@@ -62,11 +63,11 @@ result=vec4(color.rgb,a);})");
         glEnableVertexAttribArray(3);glVertexAttribPointer(3,4,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(offsetof(Vertex,color)));
         return true;
     }
-    void draw(const glm::mat4& vp,const std::vector<Vertex>& vertices,int shape,bool smoke,float angle=0) {
+    void draw(const glm::mat4& vp,const std::vector<Vertex>& vertices,int shape,bool smoke,float angle=0,bool depth_test=false) {
         if(vertices.empty()||!init())return;
         glUseProgram(program_);glUniformMatrix4fv(glGetUniformLocation(program_,"mvp"),1,GL_FALSE,&vp[0][0]);
         glUniform1i(glGetUniformLocation(program_,"shape"),shape);glUniform1f(glGetUniformLocation(program_,"angle"),angle);
-        if(smoke){glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LESS);}else glDisable(GL_DEPTH_TEST);
+        if(smoke||depth_test){glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LESS);}else glDisable(GL_DEPTH_TEST);
         glDepthMask(GL_FALSE);glDisable(GL_CULL_FACE);glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA,smoke?GL_ONE_MINUS_SRC_ALPHA:GL_ONE);
         glBindVertexArray(vao_);glBindBuffer(GL_ARRAY_BUFFER,buffer_);
@@ -76,6 +77,26 @@ result=vec4(color.rgb,a);})");
 public:
     ~GunEffects(){if(buffer_)glDeleteBuffers(1,&buffer_);if(vao_)glDeleteVertexArrays(1,&vao_);if(program_)glDeleteProgram(program_);}
     void clear(){smoke_.clear();emitted_={-100,-100};}
+    // Same eye-facing additive line as Confidential Mission's xr_gun.cpp:
+    // Normal half-width .0008 m, alpha .55 -> 0, maximum visible length 3 m.
+    void laser(const glm::mat4& vp,glm::vec3 eye,glm::vec3 muzzle,glm::vec3 target,float width,glm::vec3 colour){
+        const auto delta=target-muzzle;const auto length=glm::length(delta);
+        if(!std::isfinite(length)||length<=.05f||!std::isfinite(width)||width<=0)return;
+        auto forward=delta/length,right=side(forward,eye-muzzle)*width;
+        auto to=muzzle+forward*std::min(length,3.f);
+        std::vector<Vertex> vertices;vertices.reserve(6);
+        const glm::vec4 start{colour,.55f},end{colour,0.f};
+        quad(vertices,{muzzle-right,{},start},{muzzle+right,{},start},{to+right,{},end},{to-right,{},end});
+        draw(vp,vertices,3,false,0,true);
+    }
+    // Final UI overlay: white core and purple glow at the actual panel hit.
+    void contact(const glm::mat4& vp,glm::vec3 eye,glm::vec3 target){
+        float size=glm::length(target-eye)*.008f;if(!std::isfinite(size)||size<=0)return;
+        std::vector<Vertex> vertices;vertices.reserve(12);
+        billboard(vertices,target,eye,size,{.66f,.61f,1.f,.95f});
+        billboard(vertices,target,eye,size*.65f,{1,1,1,1});
+        draw(vp,vertices,4,false);
+    }
     void emit(int player,double born,double now,glm::vec3 muzzle,glm::vec3 forward,float scale) {
         if(emitted_[player]==born)return;emitted_[player]=born;
         if(now<born||now-born>=.1)return;

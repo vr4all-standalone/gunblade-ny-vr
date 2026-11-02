@@ -135,12 +135,8 @@ static std::array<int16_t,1920> tone(uint64_t first) {
     }
     return result;
 }
-static double dominant_pitch(const std::vector<int16_t>& stereo) {
-    constexpr size_t n=32768;
-    assert(stereo.size()>=n*2);
-    std::vector<std::complex<double>> spectrum(n);
-    const size_t begin=stereo.size()/2-n;
-    for(size_t i=0;i<n;i++)spectrum[i]=double(stereo[(begin+i)*2])*(.5-.5*std::cos(2.*std::numbers::pi*i/(n-1)));
+static void forward_fft(std::vector<std::complex<double>>& spectrum) {
+    const size_t n=spectrum.size();
     for(size_t i=1,j=0;i<n;i++) {
         size_t bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;
         if(i<j)std::swap(spectrum[i],spectrum[j]);
@@ -155,8 +151,51 @@ static double dominant_pitch(const std::vector<int16_t>& stereo) {
             }
         }
     }
+}
+static double dominant_pitch(const std::vector<int16_t>& stereo) {
+    constexpr size_t n=32768;
+    assert(stereo.size()>=n*2);
+    std::vector<std::complex<double>> spectrum(n);
+    const size_t begin=stereo.size()/2-n;
+    for(size_t i=0;i<n;i++)spectrum[i]=double(stereo[(begin+i)*2])*(.5-.5*std::cos(2.*std::numbers::pi*i/(n-1)));
+    forward_fft(spectrum);
     size_t peak=1;for(size_t i=2;i<n/2;i++)if(std::norm(spectrum[i])>std::norm(spectrum[peak]))peak=i;
     return double(peak)*48000./n;
+}
+// A single sustained sine can survive short overlap windows while a musical
+// chord develops shifted partials and extra sidebands. Exercise production DSP
+// and controller output, using a three-note, twelve-harmonic fixture rather
+// than asserting the implementation's window constants.
+static void musical_chord_keeps_harmonic_energy(double ratio,double limit) {
+    constexpr std::array<double,3> notes{110.,146.83238396,195.99771799};
+    constexpr size_t n=131072;
+    StretchCore core;std::array<int16_t,1920> input;std::array<float,4096> output;
+    std::vector<double> heard;heard.reserve(480000);
+    for(unsigned block=0;block<400;block++) {
+        for(unsigned i=0;i<960;i++) {
+            const double time=double(block*960+i)/48000.;double sample=0;
+            for(size_t note=0;note<notes.size();note++)for(unsigned harmonic=1;harmonic<=12;harmonic++)
+                sample+=.063/std::pow(double(harmonic),1.15)*std::sin(2.*std::numbers::pi*notes[note]*harmonic*time+.17*note+.13*harmonic*harmonic);
+            input[i*2]=input[i*2+1]=int16_t(std::lrint(sample*32768.));
+        }
+        core.feed(input.data(),960,100.+block*.02/ratio,2400);
+        uint32_t count;
+        while((count=core.receive(output.data(),2048)))for(uint32_t i=0;i<count;i++)heard.push_back(output[i*2]);
+    }
+    assert(heard.size()>=n);
+    std::vector<std::complex<double>> spectrum(n);
+    for(size_t i=0;i<n;i++)spectrum[i]=heard[heard.size()-n+i]*(.5-.5*std::cos(2.*std::numbers::pi*i/(n-1)));
+    forward_fft(spectrum);double all=0,outside=0;
+    for(size_t bin=1;bin<n/2;bin++) {
+        const double frequency=double(bin)*48000./n;bool harmonic_band=false;
+        for(double note:notes)for(unsigned harmonic=1;harmonic<=12;harmonic++)
+            harmonic_band|=std::abs(frequency-note*harmonic)<=3.;
+        const double power=std::norm(spectrum[bin]);all+=power;if(!harmonic_band)outside+=power;
+    }
+    const double error=outside/all;
+    std::printf("musical chord ratio=%.2f out_of_harmonic_energy=%.6f limit=%.2f\n",ratio,error,limit);
+    std::fflush(stdout);
+    assert(all>0 && error<limit);
 }
 static void assert_tone(const std::vector<int16_t>& samples,double ratio,const char* label) {
     int peak=0,antiphase_error=0;
@@ -300,6 +339,8 @@ static void bounded_warmup_and_no_stale_resume() {
     gunblade_audio_destroy(handle);
 }
 int main() {
+    musical_chord_keeps_harmonic_energy(.85,.55);
+    musical_chord_keeps_harmonic_energy(.9,.45);
     deterministic_arrival_controller();
     c_boundary_and_pause_accounting();
     concurrent_stats_partition();

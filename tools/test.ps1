@@ -10,11 +10,11 @@ try {
     $env:TEMP=$env:TMP=$taskTemp
     & $PythonPath -B -m unittest discover -s (Join-Path $taskProject 'tests') -v
     if($LASTEXITCODE){throw 'Python regressions failed.'}
-    foreach($taskTest in @('cabinet_io','input_policy','game_state','aim_policy','raster_policy','settings_io','launch_policy','audio_probe','uart_clock_policy','adaptive_audio_bridge','capture','trace_commit','presentation_policy','frame_cadence','diagnostic_capture','quest_foveation')) {
+    foreach($taskTest in @('cabinet_io','input_policy','game_state','aim_policy','raster_policy','settings_io','launch_policy','audio_probe','uart_clock_policy','adaptive_audio_bridge','capture','trace_commit','presentation_policy','frame_cadence','diagnostic_capture','quest_foveation','menu_model','menu_pointer','menu_preferences','game_options','game_options_runtime','game_options_queue','game_option_edits','game_options_restart','aim_aids')) {
         $taskExe=Join-Path $taskBuild ($taskTest+'_test.exe')
         & (Join-Path $MsysRoot 'mingw64/bin/g++.exe') -std=c++20 -Wall -Wextra -I (Join-Path $taskProject 'vendor/glm') -I (Join-Path $taskProject 'vendor/openxr/include') (Join-Path $taskProject ('tests/'+$taskTest+'_test.cpp')) -o $taskExe
         if($LASTEXITCODE){throw "Cannot compile $taskTest"}
-        if($taskTest -in @('trace_commit','diagnostic_capture')){& $taskExe $taskTemp}else{& $taskExe}
+        if($taskTest -eq 'aim_aids'){& $taskExe (Join-Path $taskTemp 'aim-aids-test.ini')}elseif($taskTest -in @('trace_commit','diagnostic_capture')){& $taskExe $taskTemp}else{& $taskExe}
         if($LASTEXITCODE){throw "Native regression failed: $taskTest"}
     }
 } finally {$env:PATH=$taskOldPath;$env:TEMP=$taskOldTemp;$env:TMP=$taskOldTmp}

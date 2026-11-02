@@ -28,6 +28,19 @@ def load_package():
 
 
 class DeliveryTests(unittest.TestCase):
+    def test_windows_import_closure_includes_built_dynamic_audio_worker(self):
+        package=load_package();TEMP.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=TEMP) as directory:
+            directory=Path(directory);files=[]
+            for name in ['gunblade.exe','gunblade_xr.dll','libopenxr_loader.dll','gunblade_audio.dll']:
+                p=directory/name;header=bytearray(70);header[:2]=b'MZ';struct.pack_into('<I',header,60,64);header[64:68]=b'PE\0\0';struct.pack_into('<H',header,68,0x8664);p.write_bytes(header);files.append(p)
+            exports={'gunblade_xr.dll':['gunblade_xr_start','gunblade_xr_stop'],'libopenxr_loader.dll':['xrGetInstanceProcAddr'],'gunblade_audio.dll':['gunblade_audio_create','gunblade_audio_push','gunblade_audio_read','gunblade_audio_pause','gunblade_audio_stats','gunblade_audio_destroy']}
+            def inspect(args,**kwargs):
+                text='\n'.join(' Name: '+n for n in exports.get(Path(args[2]).name,[])) if args[1]=='--coff-exports' else ''
+                return subprocess.CompletedProcess(args,0,stdout=text)
+            with patch.object(package.subprocess,'run',side_effect=inspect):
+                components=package.windows_components(*files[:3],directory,directory/'llvm-readobj.exe')
+            self.assertEqual(components.get('gunblade_audio.dll'),files[3])
     def test_setup_and_immersive_tasks_have_independent_identity(self):
         path = ROOT/'android/app/src/main/AndroidManifest.xml'
         self.assertTrue(path.is_file(), 'Gunblade Android manifest is missing')

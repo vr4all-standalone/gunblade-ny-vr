@@ -13,6 +13,8 @@ public:
     void set_hud_size(float size,bool gameplay,bool service=false);
     // Optional camera-space prototype. Native/reference presentation is default.
     void set_immersive(bool enabled);
+    // Fade reconstructed scenery outside the original raster in Wider view.
+    void set_view_fade(bool enabled);
     void prepare(std::shared_ptr<const NativeFrame> frame,bool wider_view=false);
     void set_presentation_lens(const NativeLens& lens);
     // One shared head-facing native marker at each actual scene aim target.

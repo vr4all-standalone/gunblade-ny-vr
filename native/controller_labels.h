@@ -12,8 +12,12 @@
 
 namespace gunblade::controller_help {
 class Labels {
+#ifdef GUNBLADE_CONTROLLER_LABEL_LAYOUT_TEST
+    friend struct LabelLayoutProbe;
+#endif
     // The reference's physical sizes: 16 mm plates, 21 mm pitch, 1.2 mm lines.
     static constexpr float Height=.016f,Gap=.025f,Pitch=.021f,StickRise=.026f;
+    static constexpr float TriggerGap=.037f; // clear the inward shell when the hand rolls
     static constexpr float LineWidth=.0012f,Dot=.0024f;
     enum Button {Aux,Start,Menu,Trigger,Stick,Grip};
     struct Picture {unsigned texture{};float hx{},hy{};};
@@ -59,22 +63,27 @@ class Labels {
         auto x=[&](int b){return glm::dot(at[b]-middle,across);};
         auto y=[&](int b){return glm::dot(at[b]-middle,up);};
         auto room=[&](float px,float py){return middle+across*px+up*py;};
-        const float side=hand==1?1.f:-1.f;float outer=0;
-        for(int b=0;b<6;b++)if(l.pictures[b].texture)outer=std::max(outer,side*x(b));
+        const float side=hand==1?1.f:-1.f;float outer=0,inner=0;
+        for(int b=0;b<6;b++)if(l.pictures[b].texture){outer=std::max(outer,side*x(b));inner=std::max(inner,-side*x(b));}
         const float column=side*(outer+Gap);std::array<float,3> ys{};float buttonsY=0,labelsY=0;
         const int rows=hand==0?3:2;int active=0;float previous=0;
         for(int b=0;b<rows;b++)if(l.pictures[b].texture){buttonsY+=y(b);ys[b]=active?std::min(y(b),previous-Pitch):y(b);previous=ys[b];labelsY+=ys[b];++active;}
         const float shift=active?(buttonsY-labelsY)/active:0;for(int b=0;b<rows;b++)ys[b]+=shift;
         l.count=0;
-        auto place=[&](int b,float px,float py,float align,const glm::vec3& to,bool toOuter=false){
+        auto place=[&](int b,float px,float py,float align,const glm::vec3& to){
             const auto& picture=l.pictures[b];if(!picture.texture)return;
             const float centreX=px+align*picture.hx;
-            l.placed[l.count++]={b,room(centreX,py),at[b],toOuter?room(centreX+side*picture.hx,py):to};
+            l.placed[l.count++]={b,room(centreX,py),at[b],to};
         };
         for(int b=0;b<rows;b++)place(b,column,ys[b],side,room(column,ys[b]));
         const float stickX=l.pictures[Stick].texture?x(Stick):0,stickY=std::max(l.pictures[Stick].texture?y(Stick):0,previous)+StickRise;
         place(Stick,stickX,stickY,0,room(stickX,stickY-Height*.5f));
-        place(Trigger,stickX,stickY+Pitch,0,glm::vec3(0),true);
+        // Button callouts extend outside each hand. Trigger extends the other
+        // way, beside its real anchor rather than above the Stick legend.
+        if(l.pictures[Trigger].texture) {
+            const float triggerColumn=-side*(inner+TriggerGap);
+            place(Trigger,triggerColumn,y(Trigger),-side,room(triggerColumn,y(Trigger)));
+        }
         if(l.pictures[Grip].texture)place(Grip,x(Grip),y(Grip)-.045f,0,room(x(Grip),y(Grip)-.045f+Height*.5f));
     }
 public:
