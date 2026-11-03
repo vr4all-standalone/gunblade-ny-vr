@@ -16,15 +16,15 @@ int main(int argc,char** argv){
  auto seek=[&](MenuAction action){for(int n=0;n<32&&ui.selected_action()!=action;n++)stick({0,-1});assert(ui.selected_action()==action);};
  tick();in.toggle=true;tick();in.toggle=false;tick();assert(ui.menu_page()==MenuPage::Gun&&ui.menu_pointer_hand()==0);
  seek(MenuAction::TabGun);select();assert(ui.menu_page()==MenuPage::Gun);
- seek(MenuAction::Laser);stick({1,0});assert(settings.laser&&settings.laser_thickness==1);
- stick({1,0});assert(settings.laser&&settings.laser_thickness==2);
+ settings.laser_thickness=1; // Legacy 2x must select Normal.
+ seek(MenuAction::Laser);stick({1,0});assert(settings.laser&&settings.laser_thickness==2);
  stick({1,0});assert(settings.laser&&settings.laser_thickness==3);
  stick({1,0});assert(settings.laser_thickness==3); // Upper boundary.
- stick({-1,0});stick({-1,0});stick({-1,0});assert(settings.laser&&settings.laser_thickness==0);
+ stick({-1,0});stick({-1,0});assert(settings.laser&&settings.laser_thickness==0);
  stick({-1,0});assert(!settings.laser&&ui.menu_pointer_hand()==0);
  stick({-1,0});assert(!settings.laser); // Lower boundary.
  stick({1,0});assert(settings.laser&&settings.laser_thickness==0);
- stick({1,0});assert(settings.laser&&settings.laser_thickness==1);
+ stick({1,0});assert(settings.laser&&settings.laser_thickness==2);
  seek(MenuAction::Reticle);stick({1,0});assert(settings.reticle_mode==ReticleMode::Custom);
  seek(MenuAction::OpenGunAdvanced);select();assert(ui.menu_page()==MenuPage::GunAdvanced);
  seek(MenuAction::ReticleMinimum);stick({1,0});assert(settings.reticle_custom_min_size==.23f&&settings.reticle_min_size==.22f);
@@ -39,13 +39,13 @@ int main(int argc,char** argv){
  seek(MenuAction::OpenWorldAdvanced);select();assert(ui.menu_page()==MenuPage::WorldAdvanced);
  seek(MenuAction::WorldScale);stick({1,0});assert(std::abs(settings.world_scale-.085f)<.00001f);
  seek(MenuAction::HudSize);stick({1,0});assert(settings.hud_size==1.05f);
- std::ifstream saved("menu-runtime-test.ini");auto cold=read_settings(saved);assert(cold.laser_thickness==1&&cold.wider_view&&cold.wider_view_fade&&cold.hud_size==1.05f&&std::abs(cold.world_scale-.085f)<.00001f);saved.close();
+ std::ifstream saved("menu-runtime-test.ini");auto cold=read_settings(saved);assert(cold.laser_thickness==2&&cold.wider_view&&cold.wider_view_fade&&cold.hud_size==1.05f&&std::abs(cold.world_scale-.085f)<.00001f);saved.close();
  // A fresh non-owner trigger claims the only pointer without activating.
  auto prior=ui.selected_action();in.hands[1].trigger=true;tick();assert(ui.menu_pointer_hand()==1&&ui.selected_action()==prior);
  in.sticks[0]={1,0};tick();assert(settings.hud_size==1.05f);in.sticks[0]={};tick();in.hands[1].trigger=false;tick();
  in.hands[0].trigger=true;tick();assert(ui.menu_pointer_hand()==0);in.hands[0].trigger=false;tick();
  seek(MenuAction::TabSystem);select();seek(MenuAction::ResetDefaults);select();assert(settings.hud_size==1.05f); // Confirmation only.
- seek(MenuAction::Cancel);select();assert(settings.laser_thickness==1);
+ seek(MenuAction::Cancel);select();assert(settings.laser_thickness==2);
  seek(MenuAction::ResetDefaults);select();seek(MenuAction::Confirm);select();assert(settings.hud_size==1&&settings.laser_thickness==0&&settings.world_preset==WorldPreset::Normal&&settings.world_scale==.08f);
  runtime.game_options={true,true,3,3,3,1};runtime.state.valid=runtime.state.ready=true;
  seek(MenuAction::TabGame);select();assert(ui.menu_page()==MenuPage::Game);

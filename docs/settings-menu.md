@@ -15,11 +15,8 @@ select their exact displayed action. The active controller's stick also adjusts.
 ## Gun
 
 Gun model, Gun angle, Laser, Crosshair and Haptics are the main controls.
-Laser is one main-page selector: Off, Normal, 2x, 5x and 10x. Advanced gun settings
-contains Gun size, Crosshair min/max size and Crosshair shrink distance. Normal
-matches Confidential Mission: an eye-facing additive glow, 0.8 mm half-width,
-fading from alpha 0.55 to zero over at most three metres. Thickness previews
-in the menu; its single active pointer stays available with gameplay Laser Off.
+Laser is one main-page selector: Off, Normal, 5x and 10x. Normal uses the former 2x width. Advanced gun settings
+contains Gun size, Crosshair min/max size and Crosshair shrink distance. The gameplay beam fades over at most three metres. The menu pointer uses its own width and is available with gameplay Laser Off.
 Existing Off/width choices persist through this update. Laser and Crosshair
 remain separate choices, and hidden/inactive crosshair tuning keeps its values.
 

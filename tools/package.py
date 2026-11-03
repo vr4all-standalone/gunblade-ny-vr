@@ -13,7 +13,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_ANDROID_LIBS = {'libmain.so', 'libSDL2.so', 'libc++_shared.so', 'libgunblade_xr.so', 'libgunblade_audio.so', 'libopenxr_loader.so'}
 REQUIRED_WINDOWS = {'gunblade.exe', 'gunblade_xr.dll', 'openxr_loader.dll'}
-VERSION = '0.1.8-beta'
+VERSION = '0.1.9-beta'
 PRIVATE_ROOT = Path('D:/VR4ALL-Gunblade-Build')
 VALIDATION = {'development_build': True, 'physical_headset_validation': 'untested',
               'quest3_validation': 'untested', 'quest3s_validation': 'untested',

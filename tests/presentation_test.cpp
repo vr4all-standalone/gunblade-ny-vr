@@ -1,3 +1,4 @@
+#include "../native/laser_settings.h"
 #include "../native/gl_context.h"
 #include "../native/presentation.h"
 #include "../native/launch_policy.h"
@@ -86,17 +87,18 @@ int main(int argc,char** argv){
     for(size_t i=0;i<brand.size();i+=4)if(brand[i]!=menu[i]||brand[i+1]!=menu[i+1]||brand[i+2]!=menu[i+2])++changed;
     check(changed>1000,"after the timed splash, an open loading menu must draw over the brand image");
     {
-        // Reproduce the reported bug through the actual presentation: menu beams
-        // previously bypassed the selected thickness with a constant width.
+        // Keep the menu label at Off so the two frames isolate pointer width.
         input.toggle=false;input.hands[0].tracked=true;
+        settings.laser=false;
         input.poses[0]=glm::translate(glm::mat4(1),glm::vec3(-.25f,-.2f,-.35f));
         ui.update(input,settings,runtime,.3);
         auto beam=[&](int width){settings.laser_thickness=width;glDepthMask(GL_TRUE);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
             ui.draw(vp,settings,GameState{},true,1,false);std::vector<uint8_t> pixels(256*256*4);
             glReadPixels(0,0,256,256,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());return pixels;};
         auto normal=beam(0),five=beam(2);
-        check(normal!=five,"actual settings pointer visibly follows laser thickness");
+        check(normal==five,"actual settings pointer has independent thickness");
         settings.laser_thickness=0;
+        settings.laser=true;
     }
     {
         // Contact point must remain bright on top of the menu surface, rather
@@ -131,11 +133,11 @@ int main(int argc,char** argv){
         // width, distance fade, additive colour and the three-metre cap.
         GunEffects line;auto projection=glm::ortho(-.05f,.05f,-.4f,.4f,.1f,10.f);
         auto capture=[&](int width,float reach=0.7f){glDepthMask(GL_TRUE);glClearColor(0,0,0,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
-            line.laser(projection,{0,0,0},{0,-.35f,-1},{0,-.35f+reach,-1},laser_half_width(width,true),{1,.08f,.05f});
+            line.laser(projection,{0,0,0},{0,-.35f,-1},{0,-.35f+reach,-1},presentation_laser_half_width(width,false),{1,.08f,.05f});
             std::vector<uint8_t> pixels(256*256*4);glReadPixels(0,0,256,256,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());return pixels;};
         auto normal=capture(0),twice=capture(1),five=capture(2),ten=capture(3);
         auto energy=[](const auto& pixels){uint64_t sum{};for(size_t i=0;i<pixels.size();i+=4)sum+=pixels[i];return sum;};
-        check(energy(normal)>0&&energy(twice)>energy(normal)*1.5&&energy(five)>energy(twice)*2&&energy(ten)>energy(five)*1.5,"CM line Normal/2x/5x/10x visibly scale actual rendered width");
+        check(energy(normal)>0&&normal==twice&&energy(five)>energy(normal)*2&&energy(ten)>energy(five)*1.5,"Normal and legacy 2x render identically, with visibly wider 5x and 10x");
         check(normal[(50*256+127)*4]>normal[(200*256+127)*4]+50,"CM line fades from alpha .55 to zero along its length");
         check(capture(0,4)==capture(0,8),"CM line has a three-metre visible cap");
         check(glGetError()==GL_NO_ERROR,"CM beam GPU state is valid");

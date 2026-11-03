@@ -1,3 +1,4 @@
+#include "laser_settings.h"
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "presentation.h"
 #include "settings_io.h"
@@ -130,7 +131,7 @@ struct Presentation::Impl {
             switch(a){
             case A::GunModel:r.choices={"Arcade","Zapper"};r.choice=normalize_gun(s.gun);break;
             case A::GunAngle:r.value=number(s.gun_angle,0)+" deg";r.stepper=true;break;
-            case A::Laser:r.choices={"Off","Normal","2x","5x","10x"};r.choice=s.laser?s.laser_thickness+1:0;r.note="Normal matches Confidential Mission";break;
+            case A::Laser:r.choices={"Off","Normal","5x","10x"};r.choice=laser_menu_choice(s.laser,s.laser_thickness);break;
             case A::Reticle:r.choices={"In-game","Custom","None"};r.choice=int(s.reticle_mode);break;
             case A::Haptics:r.choices={"Off","Light","Medium","Strong"};r.choice=haptic_level(s.haptics);break;
             case A::OpenGunAdvanced:case A::OpenWorldAdvanced:case A::OpenService:case A::HowToPlay:case A::ResetDefaults:case A::Quit:r.action=true;break;
@@ -188,7 +189,7 @@ struct Presentation::Impl {
         switch(action){
         case A::GunModel:s.gun=choice>=0?choice:next_gun(s.gun,direction);break;
         case A::GunAngle:s.gun_angle=std::clamp(s.gun_angle+direction,-30.f,30.f);break;
-        case A::Laser:{int current=s.laser?s.laser_thickness+1:0;int next=std::clamp(choice>=0?choice:current+direction,0,4);s.laser=next!=0;if(s.laser)s.laser_thickness=next-1;break;}
+        case A::Laser:{int current=laser_menu_choice(s.laser,s.laser_thickness);int next=std::clamp(choice>=0?choice:current+direction,0,3);s.laser=next!=0;if(s.laser)s.laser_thickness=laser_stored_choice(next);break;}
         case A::Reticle:set_crosshair_mode(s,choice>=0?reticle_mode_value(choice):next_reticle_mode(s.reticle_mode,direction));break;
         case A::Haptics:s.haptics=HapticLevels[choice>=0?choice:std::clamp(haptic_level(s.haptics)+direction,0,3)];break;
         case A::GunSize:s.gun_scale=std::clamp(s.gun_scale+direction*.05f,.4f,1.6f);break;
@@ -376,7 +377,7 @@ void Presentation::draw(const glm::mat4& vp,const Settings& s,const GameState& s
         if(p.opened&&effect.hand!=p.pointer.owner())continue;
         const auto& muzzle=effect.muzzle;const auto& direction=effect.direction;const auto& target=effect.target;const auto& tint=effect.tint;
         if((s.laser&&!show_help)||p.opened) {
-            p.gun_effects.laser(vp,eye,muzzle,target,laser_half_width(s.laser_thickness,p.opened||p.service_mode||show_help),glm::vec3(tint));
+            p.gun_effects.laser(vp,eye,muzzle,target,presentation_laser_half_width(s.laser_thickness,p.opened||p.service_mode||show_help),glm::vec3(tint));
             if(!p.opened&&(!reticles_active(state)||s.reticle_mode==ReticleMode::Ingame))vr::xr::drawTexture(vp,glm::translate(glm::mat4(1),target),0,.006f,.006f,tint,true);
         }
     }
